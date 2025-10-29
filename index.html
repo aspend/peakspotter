@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Three.js CDN Example</title>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script>
+        // Create World
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        scene.background = new THREE.Color(0xFFFFFF)
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        document.body.appendChild(renderer.domElement);
+
+
+
+        // Draw cylinder
+
+        const cylinderRadius = 100;
+        const cylinderHeight = 100;
+        const radialSegments = 360; // More segments for a smoother cylinder
+        const cylinderGeometry = new THREE.CylinderGeometry(cylinderRadius, cylinderRadius, cylinderHeight, radialSegments);
+        const cylinderMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc}); //  wireframe: true 
+        const cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+        scene.add(cylinder);
+
+
+        // Draw horizon
+
+        const linePoints = [];
+        const lineRadius = cylinderRadius; 
+        const lineHeight = 0; // at the horizon
+
+        for (let i = 0; i <= radialSegments; i++) {
+                const angle = (i / radialSegments) * Math.PI * 2;
+                const x = lineRadius * Math.cos(angle);
+                const z = lineRadius * Math.sin(angle);
+                linePoints.push(new THREE.Vector3(x, lineHeight, z));
+            }
+
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 }); // Red line, thickness 2
+        const line = new THREE.Line(lineGeometry, lineMaterial);
+        scene.add(line);
+        
+
+        // Draw peaks
+
+        // const user = { lat: 37.7749, lon: -122.4194 }
+
+        // const peaks = [
+        //     {
+        //         name: "Mt Diablo",
+        //         lat: 13,
+        //         long: 124,
+        //     }
+        // ]
+
+        // peaks.forEach((peak) => {
+        //     // Calculate position using current lat/long and peak lat long
+ 
+        //     // Render something at that spot
+        //     const coneHeight = 2;               // or whatever looks good visually
+        //     const geometry = new THREE.ConeGeometry(1, coneHeight, 16);
+        //     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        //     const cone = new THREE.Mesh(geometry, material);
+
+        //     // place on horizon ring
+        //     cone.position.set(
+        //       lineRadius * Math.cos(5),
+        //       coneHeight / 2,                   // raise so base touches horizon line
+        //       lineRadius * Math.sin(5)
+        //     );
+
+        //     // face inward toward viewer
+        //     cone.lookAt(0, cone.position.y, 0);
+        //     scene.add( cone );
+        // });  
+
+        // Calculate position using current lat/long and peak lat long
+        // //Calculate bearing from user to peak
+        const toRad = d => d * Math.PI / 180;
+        const toDeg = r => r * 180 / Math.PI;
+
+        function compassBearingDeg(lat1, lon1, lat2, lon2) {
+          const latr1 = toRad(lat1), latr2 = toRad(lat2);
+          const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(latr2);
+          const x = Math.cos(latr1)*Math.sin(latr2) - Math.sin(latr1)*Math.cos(latr2)*Math.cos(toRad(lon2 - lon1));
+          return (toDeg(Math.atan2(y, x)) + 360) % 360; // 0..360 where 0 is North
+        }
+
+        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(90 - bearing); // convert compass bearing to scene bearing
+
+        // //function to place the cone
+        function placePeakOnHorizon(cone, user, peak, radius, coneHeight=2) {
+          const brg = compassBearingDeg(user.lat, user.lon, peak.lat, peak.lon); // degrees
+          const ang = sceneBearingRad(brg);                                  // radians
+
+          // Base on horizon: lift by half height so rim sits at y=0
+          cone.position.set(
+            radius * Math.cos(ang),
+            coneHeight / 2,
+            radius * Math.sin(ang)
+          );
+
+          // Make cone “face” inward like a marker
+          cone.lookAt(0, cone.position.y, 0);
+        }
+
+
+        // //draw mountains
+        const user = { lat: 37.7380151, lon: -122.4299151 }; // you
+        const peaks = [{ name: "Mt Diablo", lat: 37.8818613, lon: -121.9193885, color: 0xff0000 },{ name: "Mt Tam", lat: 37.923063, lon: -122.6162559, color: 0x0000ff }];
+
+        peaks.forEach(p => {
+          const coneHeight = 2;
+          const cone = new THREE.Mesh(
+            new THREE.ConeGeometry(1, coneHeight, 16),
+            new THREE.MeshBasicMaterial({ color: p.color })
+          );
+          scene.add(cone);
+          placePeakOnHorizon(cone, user, p, lineRadius, coneHeight);
+        });
+
+
+        // Render world
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // cylinder.rotation.x += 0.01;
+            // cylinder.rotation.z += 0.01;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+
+        // Orient world rotation with device rotation
+
+
+        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        const quaternion = new THREE.Quaternion();
+        const screenOrientationQuaternion = new THREE.Quaternion();
+        const zAxis = new THREE.Vector3(0, 0, 1);
+
+        // // Rotate -90° about X so device "forward" aligns with camera -Z
+        const q1 = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0),
+          -Math.PI / 2
+        );
+
+        function onDeviceOrientation(event) {
+          if (event.alpha == null) return;
+
+          const alphaRad = THREE.MathUtils.degToRad(event.alpha);
+          const betaRad  = THREE.MathUtils.degToRad(event.beta);
+          const gammaRad = THREE.MathUtils.degToRad(event.gamma);
+
+          // Use modern API if available; fall back to window.orientation
+          const screenAngle =
+            (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+          const screenAngleRad = THREE.MathUtils.degToRad(screenAngle);
+
+          // Device -> quaternion
+          euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
+          quaternion.setFromEuler(euler);
+
+          // FIX: align device frame to Three.js camera frame
+          quaternion.multiply(q1);
+
+          // Compensate screen rotation
+          screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
+          quaternion.multiply(screenOrientationQuaternion);
+
+          camera.quaternion.copy(quaternion);
+        }
+
+        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
+
+    </script>
+</body>
+</html>
