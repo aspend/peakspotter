@@ -16,7 +16,6 @@
         document.body.appendChild(renderer.domElement);
 
 
-
         // Draw cylinder
 
         const cylinderRadius = 100;
@@ -92,7 +91,7 @@
           return (toDeg(Math.atan2(y, x)) + 360) % 360; // 0..360 where 0 is North
         }
 
-        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(90 - bearing); // convert compass bearing to scene bearing
+        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing - 90); // convert compass bearing to scene bearing
 
         // //function to place the cone
         function placePeakOnHorizon(cone, user, peak, radius, coneHeight=2) {
@@ -113,7 +112,30 @@
 
         // //draw mountains
         const user = { lat: 37.7380151, lon: -122.4299151 }; // you
-        const peaks = [{ name: "Mt Diablo", lat: 37.8818613, lon: -121.9193885, color: 0xff0000 },{ name: "Mt Tam", lat: 37.923063, lon: -122.6162559, color: 0x0000ff }];
+        const peaks = [ 
+                        { name: "Mt Tam", lat: 37.923063, lon: -122.6162559, color: 0x0000ff }, // blue
+                        { name: "Mt Diablo", lat: 37.8818613, lon: -121.9193885, color: 0xff0000 }, // red
+                      ];
+
+        function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 256;
+          const ctx = canvas.getContext("2d");
+
+          ctx.clearRect(0, 0, 256, 256);
+          ctx.fillStyle = color;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = `bold ${fontPx}px sans-serif`;
+          ctx.fillText(text, 128, 128);
+
+          const texture = new THREE.CanvasTexture(canvas);
+          const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+          const sprite = new THREE.Sprite(material);
+
+          sprite.scale.set(size, size * 2, 2); // tweak size as needed
+          return sprite;
+        }
 
         peaks.forEach(p => {
           const coneHeight = 2;
@@ -123,6 +145,64 @@
           );
           scene.add(cone);
           placePeakOnHorizon(cone, user, p, lineRadius, coneHeight);
+
+          // draw label
+
+          const label = makePeakLabel(p.name, "#000");
+          label.position.copy(cone.position);
+          label.position.y += coneHeight + 2; // a bit above the tip
+          scene.add(label);
+        });
+
+
+        // Add compass direction indicators to horizon
+
+        function makeDirectionIndicators(letter, color = "#000", fontPx = 72, size = 18) {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 256;
+          const ctx = canvas.getContext("2d");
+          ctx.clearRect(0, 0, 256, 256);
+          ctx.fillStyle = color;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = `bold ${fontPx}px sans-serif`;
+          ctx.fillText(letter, 128, 128); // letters centered on horizon
+
+          const tex = new THREE.CanvasTexture(canvas);
+          const mat = new THREE.MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            side: THREE.DoubleSide
+          });
+
+          const geo = new THREE.PlaneGeometry(size, size);
+          const mesh = new THREE.Mesh(geo, mat);
+          return mesh;
+        }
+
+        const dirs = [
+          { label: "N", bearing: 0   },
+          { label: "E", bearing: 90  },
+          { label: "S", bearing: 180 },
+          { label: "W", bearing: 270 }
+        ];
+
+        dirs.forEach(d => {
+          const mesh = makeDirectionIndicators(d.label);
+          const ang = sceneBearingRad(d.bearing);
+          const r = lineRadius;
+
+          // position on horizon ring
+          mesh.position.set(
+            r * Math.cos(ang),
+            0, // exactly on the horizon
+            r * Math.sin(ang)
+          );
+
+          // orient so the letter faces the center (radially)
+          mesh.lookAt(0, 0, 0);
+
+          scene.add(mesh);
         });
 
 
@@ -148,8 +228,9 @@
         // // Rotate -90° about X so device "forward" aligns with camera -Z
         const q1 = new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(1, 0, 0),
-          -Math.PI / 2
         );
+
+
 
         function onDeviceOrientation(event) {
           if (event.alpha == null) return;
