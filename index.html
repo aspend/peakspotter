@@ -58,7 +58,7 @@
           return (toDeg(Math.atan2(y, x)) + 360) % 360; // 0..360 where 0 is North
         }
 
-        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing-180); // convert compass bearing to scene bearing
+        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing-270); // convert compass bearing to scene bearing
 
         // //function to place the cone
         function placePeakOnHorizon(cone, user, peak, radius, coneHeight=2) {
