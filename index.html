@@ -46,39 +46,6 @@
         scene.add(line);
         
 
-        // Draw peaks
-
-        // const user = { lat: 37.7749, lon: -122.4194 }
-
-        // const peaks = [
-        //     {
-        //         name: "Mt Diablo",
-        //         lat: 13,
-        //         long: 124,
-        //     }
-        // ]
-
-        // peaks.forEach((peak) => {
-        //     // Calculate position using current lat/long and peak lat long
- 
-        //     // Render something at that spot
-        //     const coneHeight = 2;               // or whatever looks good visually
-        //     const geometry = new THREE.ConeGeometry(1, coneHeight, 16);
-        //     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        //     const cone = new THREE.Mesh(geometry, material);
-
-        //     // place on horizon ring
-        //     cone.position.set(
-        //       lineRadius * Math.cos(5),
-        //       coneHeight / 2,                   // raise so base touches horizon line
-        //       lineRadius * Math.sin(5)
-        //     );
-
-        //     // face inward toward viewer
-        //     cone.lookAt(0, cone.position.y, 0);
-        //     scene.add( cone );
-        // });  
-
         // Calculate position using current lat/long and peak lat long
         // //Calculate bearing from user to peak
         const toRad = d => d * Math.PI / 180;
@@ -91,7 +58,7 @@
           return (toDeg(Math.atan2(y, x)) + 360) % 360; // 0..360 where 0 is North
         }
 
-        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing - 90); // convert compass bearing to scene bearing
+        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing); // convert compass bearing to scene bearing
 
         // //function to place the cone
         function placePeakOnHorizon(cone, user, peak, radius, coneHeight=2) {
