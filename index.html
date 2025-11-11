@@ -5,7 +5,29 @@
 </head>
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <button id="calibrateBtn"
+            style="position:fixed;top:10px;left:10px;z-index:10;">
+      I'm facing NORTH
+    </button>
     <script>
+        // Set Globals
+
+        let lastAlpha = null;
+        let northOffsetDeg = 0;
+        let hasCalibratedNorth = false;
+
+
+        document.getElementById('calibrateBtn').addEventListener('click', () => {
+          if (lastAlpha == null) {
+            alert("No orientation data yet. Move your phone a bit and try again.");
+            return;
+          }
+          // Whatever alpha is right now = true north
+          northOffsetDeg = lastAlpha;
+          hasCalibratedNorth = true;
+          document.getElementById('calibrateBtn').style.display = 'none';
+        });
+
         // Create World
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -45,6 +67,39 @@
         const line = new THREE.Line(lineGeometry, lineMaterial);
         scene.add(line);
         
+
+        // Draw peaks
+
+        // const user = { lat: 37.7749, lon: -122.4194 }
+
+        // const peaks = [
+        //     {
+        //         name: "Mt Diablo",
+        //         lat: 13,
+        //         long: 124,
+        //     }
+        // ]
+
+        // peaks.forEach((peak) => {
+        //     // Calculate position using current lat/long and peak lat long
+ 
+        //     // Render something at that spot
+        //     const coneHeight = 2;               // or whatever looks good visually
+        //     const geometry = new THREE.ConeGeometry(1, coneHeight, 16);
+        //     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        //     const cone = new THREE.Mesh(geometry, material);
+
+        //     // place on horizon ring
+        //     cone.position.set(
+        //       lineRadius * Math.cos(5),
+        //       coneHeight / 2,                   // raise so base touches horizon line
+        //       lineRadius * Math.sin(5)
+        //     );
+
+        //     // face inward toward viewer
+        //     cone.lookAt(0, cone.position.y, 0);
+        //     scene.add( cone );
+        // });  
 
         // Calculate position using current lat/long and peak lat long
         // //Calculate bearing from user to peak
@@ -200,30 +255,47 @@
 
 
 
+        // function onDeviceOrientation(event) {
+        //   if (event.alpha == null) return;
+
+        //   const alphaRad = THREE.MathUtils.degToRad(event.alpha);
+        //   const betaRad  = THREE.MathUtils.degToRad(event.beta);
+        //   const gammaRad = THREE.MathUtils.degToRad(event.gamma);
+
+        //   // Use modern API if available; fall back to window.orientation
+        //   const screenAngle =
+        //     (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+        //   const screenAngleRad = THREE.MathUtils.degToRad(screenAngle);
+
+        //   // Device -> quaternion
+        //   euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
+        //   quaternion.setFromEuler(euler);
+
+        //   // FIX: align device frame to Three.js camera frame
+        //   quaternion.multiply(q1);
+
+        //   // Compensate screen rotation
+        //   screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
+        //   quaternion.multiply(screenOrientationQuaternion);
+
+        //   camera.quaternion.copy(quaternion);
+        // }
         function onDeviceOrientation(event) {
           if (event.alpha == null) return;
 
-          const alphaRad = THREE.MathUtils.degToRad(event.alpha);
-          const betaRad  = THREE.MathUtils.degToRad(event.beta);
-          const gammaRad = THREE.MathUtils.degToRad(event.gamma);
+          lastAlpha = event.alpha; // always track latest raw reading
 
-          // Use modern API if available; fall back to window.orientation
-          const screenAngle =
-            (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-          const screenAngleRad = THREE.MathUtils.degToRad(screenAngle);
+          if (!hasCalibratedNorth) {
+            // Don't rotate yet; wait until user calibrates
+            return;
+          }
 
-          // Device -> quaternion
-          euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
-          quaternion.setFromEuler(euler);
+          // Correct heading using the calibrated offset
+          const headingDeg = (lastAlpha - northOffsetDeg + 360) % 360;
+          const headingRad = THREE.MathUtils.degToRad(headingDeg);
 
-          // FIX: align device frame to Three.js camera frame
-          quaternion.multiply(q1);
-
-          // Compensate screen rotation
-          screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
-          quaternion.multiply(screenOrientationQuaternion);
-
-          camera.quaternion.copy(quaternion);
+          // Yaw only: rotate around Y so heading 0 = looking toward true north
+          camera.rotation.set(0, -headingRad, 0);
         }
 
         window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
