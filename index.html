@@ -185,7 +185,7 @@
         animate();
 
 
-        // --- ORIENTATION SETUP (Android-first, NO UI calibration) ---
+        // --- ORIENTATION SETUP (Android-first, using AbsoluteOrientationSensor) ---
 
         // Shared math objects
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -206,22 +206,28 @@
           return THREE.MathUtils.degToRad(screenAngle);
         }
 
-        // Core: take a base orientation quaternion from the sensor and apply
-        // all the fixed transforms to the camera.
-        function applyOrientation(baseQuat) {
+        /**
+         * Apply a base quaternion coming from a sensor to the camera.
+         * 
+         * @param {Object} baseQuat - { x, y, z, w }
+         * @param {boolean} compensateScreen - whether to apply screen-orientation compensation
+         */
+        function applyOrientationFromSensor(baseQuat, compensateScreen) {
           // 1. Start from sensor quaternion
           camera.quaternion.set(baseQuat.x, baseQuat.y, baseQuat.z, baseQuat.w);
 
           // 2. Align device frame to Three.js camera frame
           camera.quaternion.multiply(q1);
 
-          // 3. Compensate screen rotation
-          const screenAngleRad = getScreenAngleRad();
-          screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
-          camera.quaternion.multiply(screenOrientationQuaternion);
+          // 3. Compensate screen rotation (needed for deviceorientation, often NOT for AOS)
+          if (compensateScreen) {
+            const screenAngleRad = getScreenAngleRad();
+            screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
+            camera.quaternion.multiply(screenOrientationQuaternion);
+          }
         }
 
-        // --- ABSOLUTEORIENTATIONSENSOR (Android Chrome) ---
+        // --- ABSOLUTEORIENTATIONSENSOR (main path on Android) ---
 
         function startAbsoluteOrientationSensor() {
           if (typeof AbsoluteOrientationSensor === 'undefined') {
@@ -233,7 +239,7 @@
           try {
             const sensor = new AbsoluteOrientationSensor({
               frequency: 60,
-              referenceFrame: 'device' // orientation relative to Earth frame
+              referenceFrame: 'device'
             });
 
             sensor.addEventListener('reading', () => {
@@ -241,7 +247,11 @@
               if (!q) return;
 
               const baseQuat = { x: q[0], y: q[1], z: q[2], w: q[3] };
-              applyOrientation(baseQuat);
+
+              // NOTE: For AbsoluteOrientationSensor we *do not* compensate screen rotation here.
+              // The sensor already gives orientation in a stable frame; applying screen-angle
+              // like we did for DeviceOrientation tends to introduce a diagonal tilt.
+              applyOrientationFromSensor(baseQuat, false);
             });
 
             sensor.addEventListener('error', event => {
@@ -259,7 +269,7 @@
           }
         }
 
-        // --- DEVICEORIENTATION FALLBACK (if sensor not available) ---
+        // --- DEVICEORIENTATION FALLBACK (if AOS not available) ---
 
         function startDeviceOrientationFallback() {
           function onDeviceOrientation(event) {
@@ -269,7 +279,7 @@
             const betaRad  = THREE.MathUtils.degToRad(event.beta);
             const gammaRad = THREE.MathUtils.degToRad(event.gamma);
 
-            // Same mapping pattern used by Three.js DeviceOrientationControls
+            // Same mapping as your old, good-feeling version
             euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
             quaternion.setFromEuler(euler);
 
@@ -280,7 +290,8 @@
               w: quaternion.w
             };
 
-            applyOrientation(baseQuat);
+            // For DeviceOrientation we DO compensate screen orientation
+            applyOrientationFromSensor(baseQuat, true);
           }
 
           window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
@@ -289,6 +300,7 @@
 
         // Start orientation logic
         startAbsoluteOrientationSensor();
+
 
     </script>
 </body>
