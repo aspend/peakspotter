@@ -5,29 +5,8 @@
 </head>
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
-    <button id="calibrateBtn"
-            style="position:fixed;top:10px;left:10px;z-index:10;">
-      I'm facing NORTH
-    </button>
     <script>
-        // Set Globals
-
-        let lastAlpha = null;
-        let northOffsetDeg = 0;
-        let hasCalibratedNorth = false;
-
-
-        document.getElementById('calibrateBtn').addEventListener('click', () => {
-          if (lastAlpha == null) {
-            alert("No orientation data yet. Move your phone a bit and try again.");
-            return;
-          }
-          // Whatever alpha is right now = true north
-          northOffsetDeg = lastAlpha;
-          hasCalibratedNorth = true;
-          document.getElementById('calibrateBtn').style.display = 'none';
-        });
-
+      
         // Create World
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -67,39 +46,6 @@
         const line = new THREE.Line(lineGeometry, lineMaterial);
         scene.add(line);
         
-
-        // Draw peaks
-
-        // const user = { lat: 37.7749, lon: -122.4194 }
-
-        // const peaks = [
-        //     {
-        //         name: "Mt Diablo",
-        //         lat: 13,
-        //         long: 124,
-        //     }
-        // ]
-
-        // peaks.forEach((peak) => {
-        //     // Calculate position using current lat/long and peak lat long
- 
-        //     // Render something at that spot
-        //     const coneHeight = 2;               // or whatever looks good visually
-        //     const geometry = new THREE.ConeGeometry(1, coneHeight, 16);
-        //     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        //     const cone = new THREE.Mesh(geometry, material);
-
-        //     // place on horizon ring
-        //     cone.position.set(
-        //       lineRadius * Math.cos(5),
-        //       coneHeight / 2,                   // raise so base touches horizon line
-        //       lineRadius * Math.sin(5)
-        //     );
-
-        //     // face inward toward viewer
-        //     cone.lookAt(0, cone.position.y, 0);
-        //     scene.add( cone );
-        // });  
 
         // Calculate position using current lat/long and peak lat long
         // //Calculate bearing from user to peak
@@ -239,66 +185,124 @@
         animate();
 
 
-        // Orient world rotation with device rotation
+        // --- ORIENTATION SETUP (Android-first, with AbsoluteOrientationSensor) ---
 
-
+        // Shared math objects
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
         const quaternion = new THREE.Quaternion();
         const screenOrientationQuaternion = new THREE.Quaternion();
         const zAxis = new THREE.Vector3(0, 0, 1);
 
-        // // Rotate -90° about X so device "forward" aligns with camera -Z
+        // Rotate -90° about X so device "forward" aligns with camera -Z
         const q1 = new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(1, 0, 0),
           -Math.PI / 2
         );
 
+        // Calibration: how far off from "true north" we are (in radians)
+        let northOffset = 0;
 
+        // Helper: get screen rotation (portrait/landscape) in radians
+        function getScreenAngleRad() {
+          const screenAngle =
+            (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+          return THREE.MathUtils.degToRad(screenAngle);
+        }
 
-        // function onDeviceOrientation(event) {
-        //   if (event.alpha == null) return;
+        // Core: take a base orientation quaternion from the sensor and apply
+        // all the fixed transforms + calibration to the camera.
+        function applyOrientation(baseQuat) {
+          // 1. Start from sensor quaternion
+          camera.quaternion.set(baseQuat.x, baseQuat.y, baseQuat.z, baseQuat.w);
 
-        //   const alphaRad = THREE.MathUtils.degToRad(event.alpha);
-        //   const betaRad  = THREE.MathUtils.degToRad(event.beta);
-        //   const gammaRad = THREE.MathUtils.degToRad(event.gamma);
+          // 2. Align device frame to Three.js camera frame
+          camera.quaternion.multiply(q1);
 
-        //   // Use modern API if available; fall back to window.orientation
-        //   const screenAngle =
-        //     (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-        //   const screenAngleRad = THREE.MathUtils.degToRad(screenAngle);
+          // 3. Compensate screen rotation
+          const screenAngleRad = getScreenAngleRad();
+          screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
+          camera.quaternion.multiply(screenOrientationQuaternion);
 
-        //   // Device -> quaternion
-        //   euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
-        //   quaternion.setFromEuler(euler);
+          // 4. Apply "north" calibration offset around vertical axis
+          camera.rotateY(northOffset);
+        }
 
-        //   // FIX: align device frame to Three.js camera frame
-        //   quaternion.multiply(q1);
+        // --- CALIBRATION BUTTON ("I'm facing NORTH") ---
 
-        //   // Compensate screen rotation
-        //   screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
-        //   quaternion.multiply(screenOrientationQuaternion);
+        document.getElementById('calibrateBtn').addEventListener('click', () => {
+          const tmpEuler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+          // Make current yaw = 0 (north), so offset is -current yaw
+          northOffset = -tmpEuler.y;
+          console.log('Calibrated northOffset (radians):', northOffset);
+        });
 
-        //   camera.quaternion.copy(quaternion);
-        // }
-        function onDeviceOrientation(event) {
-          if (event.alpha == null) return;
+        // --- ABSOLUTEORIENTATIONSENSOR (Android Chrome) ---
 
-          lastAlpha = event.alpha; // always track latest raw reading
-
-          if (!hasCalibratedNorth) {
-            // Don't rotate yet; wait until user calibrates
+        function startAbsoluteOrientationSensor() {
+          if (!('AbsoluteOrientationSensor' in window)) {
+            console.warn('AbsoluteOrientationSensor not supported, using deviceorientation fallback.');
+            startDeviceOrientationFallback();
             return;
           }
 
-          // Correct heading using the calibrated offset
-          const headingDeg = (lastAlpha - northOffsetDeg + 360) % 360;
-          const headingRad = THREE.MathUtils.degToRad(headingDeg);
+          try {
+            const sensor = new AbsoluteOrientationSensor({
+              frequency: 60,
+              referenceFrame: 'device' // orientation relative to Earth frame
+            });
 
-          // Yaw only: rotate around Y so heading 0 = looking toward true north
-          camera.rotation.set(0, -headingRad, 0);
+            sensor.addEventListener('reading', () => {
+              const q = sensor.quaternion; // [x, y, z, w]
+              if (!q) return;
+
+              const baseQuat = { x: q[0], y: q[1], z: q[2], w: q[3] };
+              applyOrientation(baseQuat);
+            });
+
+            sensor.addEventListener('error', event => {
+              console.error('AbsoluteOrientationSensor error:', event.error);
+              console.warn('Falling back to deviceorientation.');
+              sensor.stop();
+              startDeviceOrientationFallback();
+            });
+
+            sensor.start();
+            console.log('AbsoluteOrientationSensor started.');
+          } catch (e) {
+            console.error('Failed to start AbsoluteOrientationSensor:', e);
+            startDeviceOrientationFallback();
+          }
         }
 
-        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
+        // --- DEVICEORIENTATION FALLBACK (if sensor not available) ---
+
+        function startDeviceOrientationFallback() {
+          function onDeviceOrientation(event) {
+            if (event.alpha == null) return;
+
+            const alphaRad = THREE.MathUtils.degToRad(event.alpha);
+            const betaRad  = THREE.MathUtils.degToRad(event.beta);
+            const gammaRad = THREE.MathUtils.degToRad(event.gamma);
+
+            euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
+            quaternion.setFromEuler(euler);
+
+            const baseQuat = {
+              x: quaternion.x,
+              y: quaternion.y,
+              z: quaternion.z,
+              w: quaternion.w
+            };
+
+            applyOrientation(baseQuat);
+          }
+
+          window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
+          console.log('Using deviceorientation fallback.');
+        }
+
+        // Start orientation logic
+        startAbsoluteOrientationSensor();
 
     </script>
 </body>
