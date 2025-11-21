@@ -185,7 +185,7 @@
         animate();
 
 
-        // --- ORIENTATION SETUP (Android-first, with AbsoluteOrientationSensor) ---
+        // --- ORIENTATION SETUP (Android-first, NO UI calibration) ---
 
         // Shared math objects
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -199,9 +199,6 @@
           -Math.PI / 2
         );
 
-        // Calibration: how far off from "true north" we are (in radians)
-        let northOffset = 0;
-
         // Helper: get screen rotation (portrait/landscape) in radians
         function getScreenAngleRad() {
           const screenAngle =
@@ -210,7 +207,7 @@
         }
 
         // Core: take a base orientation quaternion from the sensor and apply
-        // all the fixed transforms + calibration to the camera.
+        // all the fixed transforms to the camera.
         function applyOrientation(baseQuat) {
           // 1. Start from sensor quaternion
           camera.quaternion.set(baseQuat.x, baseQuat.y, baseQuat.z, baseQuat.w);
@@ -222,24 +219,12 @@
           const screenAngleRad = getScreenAngleRad();
           screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
           camera.quaternion.multiply(screenOrientationQuaternion);
-
-          // 4. Apply "north" calibration offset around vertical axis
-          camera.rotateY(northOffset);
         }
-
-        // --- CALIBRATION BUTTON ("I'm facing NORTH") ---
-
-        document.getElementById('calibrateBtn').addEventListener('click', () => {
-          const tmpEuler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
-          // Make current yaw = 0 (north), so offset is -current yaw
-          northOffset = -tmpEuler.y;
-          console.log('Calibrated northOffset (radians):', northOffset);
-        });
 
         // --- ABSOLUTEORIENTATIONSENSOR (Android Chrome) ---
 
         function startAbsoluteOrientationSensor() {
-          if (!('AbsoluteOrientationSensor' in window)) {
+          if (typeof AbsoluteOrientationSensor === 'undefined') {
             console.warn('AbsoluteOrientationSensor not supported, using deviceorientation fallback.');
             startDeviceOrientationFallback();
             return;
@@ -284,6 +269,7 @@
             const betaRad  = THREE.MathUtils.degToRad(event.beta);
             const gammaRad = THREE.MathUtils.degToRad(event.gamma);
 
+            // Same mapping pattern used by Three.js DeviceOrientationControls
             euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
             quaternion.setFromEuler(euler);
 
