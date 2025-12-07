@@ -6,7 +6,6 @@
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
-      
         // Create World
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -45,7 +44,40 @@
         const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 }); // Red line, thickness 2
         const line = new THREE.Line(lineGeometry, lineMaterial);
         scene.add(line);
-        
+
+
+        // Draw peaks
+
+        // const user = { lat: 37.7749, lon: -122.4194 }
+
+        // const peaks = [
+        //     {
+        //         name: "Mt Diablo",
+        //         lat: 13,
+        //         long: 124,
+        //     }
+        // ]
+
+        // peaks.forEach((peak) => {
+        //     // Calculate position using current lat/long and peak lat long
+
+        //     // Render something at that spot
+        //     const coneHeight = 2;               // or whatever looks good visually
+        //     const geometry = new THREE.ConeGeometry(1, coneHeight, 16);
+        //     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        //     const cone = new THREE.Mesh(geometry, material);
+
+        //     // place on horizon ring
+        //     cone.position.set(
+        //       lineRadius * Math.cos(5),
+        //       coneHeight / 2,                   // raise so base touches horizon line
+        //       lineRadius * Math.sin(5)
+        //     );
+
+        //     // face inward toward viewer
+        //     cone.lookAt(0, cone.position.y, 0);
+        //     scene.add( cone );
+        // });  
 
         // Calculate position using current lat/long and peak lat long
         // //Calculate bearing from user to peak
@@ -59,7 +91,7 @@
           return (toDeg(Math.atan2(y, x)) + 360) % 360; // 0..360 where 0 is North
         }
 
-        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing-90); // convert compass bearing to scene bearing
+        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing - 90); // convert compass bearing to scene bearing
 
         // //function to place the cone
         function placePeakOnHorizon(cone, user, peak, radius, coneHeight=2) {
@@ -185,122 +217,49 @@
         animate();
 
 
-        // --- ORIENTATION SETUP (Android-first, using AbsoluteOrientationSensor) ---
+        // Orient world rotation with device rotation
 
-        // Shared math objects
+
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
         const quaternion = new THREE.Quaternion();
         const screenOrientationQuaternion = new THREE.Quaternion();
         const zAxis = new THREE.Vector3(0, 0, 1);
 
-        // Rotate -90° about X so device "forward" aligns with camera -Z
+        // // Rotate -90° about X so device "forward" aligns with camera -Z
         const q1 = new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(1, 0, 0),
           -Math.PI / 2
         );
 
-        // Helper: get screen rotation (portrait/landscape) in radians
-        function getScreenAngleRad() {
+
+
+        function onDeviceOrientation(event) {
+          if (event.alpha == null) return;
+
+          const alphaRad = THREE.MathUtils.degToRad(event.alpha);
+          const betaRad  = THREE.MathUtils.degToRad(event.beta);
+          const gammaRad = THREE.MathUtils.degToRad(event.gamma);
+
+          // Use modern API if available; fall back to window.orientation
           const screenAngle =
             (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-          return THREE.MathUtils.degToRad(screenAngle);
+          const screenAngleRad = THREE.MathUtils.degToRad(screenAngle);
+
+          // Device -> quaternion
+          euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
+          quaternion.setFromEuler(euler);
+
+          // FIX: align device frame to Three.js camera frame
+          quaternion.multiply(q1);
+
+          // Compensate screen rotation
+          screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
+          quaternion.multiply(screenOrientationQuaternion);
+
+          camera.quaternion.copy(quaternion);
         }
 
-        /**
-         * Apply a base quaternion coming from a sensor to the camera.
-         * 
-         * @param {Object} baseQuat - { x, y, z, w }
-         * @param {boolean} compensateScreen - whether to apply screen-orientation compensation
-         */
-        function applyOrientationFromSensor(baseQuat, compensateScreen) {
-          // 1. Start from sensor quaternion
-          camera.quaternion.set(baseQuat.x, baseQuat.y, baseQuat.z, baseQuat.w);
-
-          // 2. Align device frame to Three.js camera frame
-          camera.quaternion.multiply(q1);
-
-          // 3. Compensate screen rotation (needed for deviceorientation, often NOT for AOS)
-          if (compensateScreen) {
-            const screenAngleRad = getScreenAngleRad();
-            screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
-            camera.quaternion.multiply(screenOrientationQuaternion);
-          }
-        }
-
-        // --- ABSOLUTEORIENTATIONSENSOR (main path on Android) ---
-
-        function startAbsoluteOrientationSensor() {
-          if (typeof AbsoluteOrientationSensor === 'undefined') {
-            console.warn('AbsoluteOrientationSensor not supported, using deviceorientation fallback.');
-            startDeviceOrientationFallback();
-            return;
-          }
-
-          try {
-            const sensor = new AbsoluteOrientationSensor({
-              frequency: 60,
-              referenceFrame: 'device'
-            });
-
-            sensor.addEventListener('reading', () => {
-              const q = sensor.quaternion; // [x, y, z, w]
-              if (!q) return;
-
-              const baseQuat = { x: q[0], y: q[1], z: q[2], w: q[3] };
-
-              // NOTE: For AbsoluteOrientationSensor we *do not* compensate screen rotation here.
-              // The sensor already gives orientation in a stable frame; applying screen-angle
-              // like we did for DeviceOrientation tends to introduce a diagonal tilt.
-              applyOrientationFromSensor(baseQuat, false);
-            });
-
-            sensor.addEventListener('error', event => {
-              console.error('AbsoluteOrientationSensor error:', event.error);
-              console.warn('Falling back to deviceorientation.');
-              sensor.stop();
-              startDeviceOrientationFallback();
-            });
-
-            sensor.start();
-            console.log('AbsoluteOrientationSensor started.');
-          } catch (e) {
-            console.error('Failed to start AbsoluteOrientationSensor:', e);
-            startDeviceOrientationFallback();
-          }
-        }
-
-        // --- DEVICEORIENTATION FALLBACK (if AOS not available) ---
-
-        function startDeviceOrientationFallback() {
-          function onDeviceOrientation(event) {
-            if (event.alpha == null) return;
-
-            const alphaRad = THREE.MathUtils.degToRad(event.alpha);
-            const betaRad  = THREE.MathUtils.degToRad(event.beta);
-            const gammaRad = THREE.MathUtils.degToRad(event.gamma);
-
-            // Same mapping as your old, good-feeling version
-            euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
-            quaternion.setFromEuler(euler);
-
-            const baseQuat = {
-              x: quaternion.x,
-              y: quaternion.y,
-              z: quaternion.z,
-              w: quaternion.w
-            };
-
-            // For DeviceOrientation we DO compensate screen orientation
-            applyOrientationFromSensor(baseQuat, true);
-          }
-
-          window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
-          console.log('Using deviceorientation fallback.');
-        }
-
-        // Start orientation logic
-        startAbsoluteOrientationSensor();
-
+        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
 
     </script>
 </body>
