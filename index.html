@@ -6,6 +6,64 @@
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
+
+        // Add calibration
+
+        // --- Absolute-north calibration using deviceorientationabsolute ---
+        let alphaOffsetDeg = 0;        // what we'll add to event.alpha
+        let haveNorthOffset = false;
+        let firstRelAlpha = null;      // from your normal deviceorientation
+        let firstAbsAlpha = null;      // from deviceorientationabsolute (true north)
+
+        // When we have both, compute the constant offset
+        function maybeCalibrateOffset() {
+          if (!haveNorthOffset && firstRelAlpha != null && firstAbsAlpha != null) {
+            alphaOffsetDeg = (firstAbsAlpha - firstRelAlpha + 360) % 360;
+            haveNorthOffset = true;
+            // console.log('calibrated alphaOffsetDeg =', alphaOffsetDeg);
+          }
+        }
+
+        // Grab ONE "relative" alpha sample (same frame your current handler uses)
+        window.addEventListener(
+          "deviceorientation",
+          (e) => {
+            if (firstRelAlpha == null && typeof e.alpha === "number") {
+              firstRelAlpha = (e.alpha + 360) % 360;
+              maybeCalibrateOffset();
+            }
+          },
+          { passive: true }
+        );
+
+        // Prefer absolute heading when available (Chrome on Android)
+        if ("ondeviceorientationabsolute" in window) {
+          window.addEventListener(
+            "deviceorientationabsolute",
+            (e) => {
+              if (firstAbsAlpha == null && typeof e.alpha === "number") {
+                firstAbsAlpha = (e.alpha + 360) % 360; // 0..360, true-ish north
+                maybeCalibrateOffset();
+              }
+            },
+            true
+          );
+        } else {
+          // Fallback: some browsers expose absolute compass via webkitCompassHeading
+          window.addEventListener(
+            "deviceorientation",
+            (e) => {
+              if (
+                firstAbsAlpha == null &&
+                typeof e.webkitCompassHeading === "number"
+              ) {
+                firstAbsAlpha = (e.webkitCompassHeading + 360) % 360;
+                maybeCalibrateOffset();
+              }
+            },
+            true
+          );
+        }
         // Create World
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -235,6 +293,14 @@
 
         function onDeviceOrientation(event) {
           if (event.alpha == null) return;
+
+          // Normalize to 0..360
+          const rawAlpha = (event.alpha + 360) % 360;
+
+          // If we have an absolute-north offset, apply it
+          const alphaAdjDeg = haveNorthOffset
+            ? (rawAlpha + alphaOffsetDeg) % 360
+            : rawAlpha;
 
           const alphaRad = THREE.MathUtils.degToRad(event.alpha);
           const betaRad  = THREE.MathUtils.degToRad(event.beta);
