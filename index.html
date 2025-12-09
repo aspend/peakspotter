@@ -60,19 +60,37 @@
         const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing - 90); // convert compass bearing to scene bearing
 
         // //function to place the cone
-        function placePeakOnHorizon(cone, user, peak, radius, coneHeight=2) {
-          const brg = compassBearingDeg(user.lat, user.lon, peak.lat, peak.lon); // degrees
-          const ang = sceneBearingRad(brg);                                  // radians
+        function placePeakOnHorizon(obj, user, peak, radius, height = 2) {
+          const brg = compassBearingDeg(user.lat, user.lon, peak.lat, peak.lon);
+          const ang = sceneBearingRad(brg);
 
-          // Base on horizon: lift by half height so rim sits at y=0
-          cone.position.set(
+          obj.position.set(
             radius * Math.cos(ang),
-            coneHeight / 2,
+            0,                 // base sits on horizon line
             radius * Math.sin(ang)
           );
 
-          // Make cone “face” inward like a marker
-          cone.lookAt(0, cone.position.y, 0);
+          // face inward toward the viewer
+          obj.lookAt(0, 0, 0);
+        }
+
+        // // make triangle outline instead
+
+        function makeTrianglePeak(height, width, color = 0x000000) {
+          // Local triangle points, base centered at (0,0,0), pointing "up" in +Y
+          const halfW = width / 2;
+          const points = [
+            new THREE.Vector3(-halfW, 0, 0),   // left base
+            new THREE.Vector3(0,      height, 0), // tip
+            new THREE.Vector3(halfW,  0, 0),   // right base
+            new THREE.Vector3(-halfW, 0, 0),   // close the loop
+          ];
+
+          const geom = new THREE.BufferGeometry().setFromPoints(points);
+          const mat  = new THREE.LineBasicMaterial({ color });
+          const tri  = new THREE.Line(geom, mat);
+
+          return tri;
         }
 
 
@@ -80,6 +98,7 @@
         const user = { lat: 37.7380151, lon: -122.4299151 }; // you
         const peaks = [ 
                         { name: "Mt Tam", lat: 37.923063, lon: -122.6162559, ele: 744, color: 0x0000ff }, // blue
+                        { name: "Mt Tam2", lat: 37.923493, lon: -122.6162569, ele: 944, color: 0xff0000 }, // blue
                         { name: "Mt Diablo", lat: 37.8818613, lon: -121.9193885, ele: 1173, color: 0xff0000 }, // red
                       ];
         const maxEle = 1173
@@ -103,23 +122,44 @@
           return sprite;
         }
 
+        // peaks.forEach(p => {
+        //   const distance = p.ele
+        //   const coneHeight = 10*p.ele/maxEle;
+        //   const cone = new THREE.Mesh(
+        //     new THREE.ConeGeometry(coneHeight/2, coneHeight, 16),
+        //     new THREE.MeshBasicMaterial({ color: p.color })
+        //   );
+        //   scene.add(cone);
+        //   placePeakOnHorizon(cone, user, p, lineRadius, coneHeight);
+
+        //   // draw label
+
+        //   const label = makePeakLabel(p.name, "#000");
+        //   label.position.copy(cone.position);
+        //   label.position.y += coneHeight + 2; // a bit above the tip
+        //   scene.add(label);
+        // });
+
+
         peaks.forEach(p => {
-          const distance = p.ele
-          const coneHeight = 10*p.ele/maxEle;
-          const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(coneHeight/2, coneHeight, 16),
-            new THREE.MeshBasicMaterial({ color: p.color })
-          );
-          scene.add(cone);
-          placePeakOnHorizon(cone, user, p, lineRadius, coneHeight);
+          // decide how tall/wide you want the outline in world units
+          const height = 10*p.ele/maxEle;   // tweak to taste or compute from real mountain
+          const width  = 3;   // base width in world units
 
-          // draw label
+          const tri = makeTrianglePeak(height, width, p.color);
+          scene.add(tri);
 
+          // re-use your existing placement logic,
+          // but now we think in terms of "height" instead of coneHeight
+          placePeakOnHorizon(tri, user, p, lineRadius, height);
+
+          // label above tip (optional)
           const label = makePeakLabel(p.name, "#000");
-          label.position.copy(cone.position);
-          label.position.y += coneHeight + 2; // a bit above the tip
+          label.position.copy(tri.position);
+          label.position.y += height + 2;
           scene.add(label);
         });
+
 
 
         // Add compass direction indicators to horizon
@@ -226,7 +266,7 @@
           camera.quaternion.copy(quaternion);
         }
 
-        window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
+        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
 
     </script>
 </body>
