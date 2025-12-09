@@ -5,65 +5,59 @@
 </head>
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <div id="log" style="position:fixed;top:0;left:0;background:white;padding:10px;z-index:9999;font-size:14px;">
+      Waiting for sensors…
+    </div>
+
     <script>
+    const logDiv = document.getElementById("log");
 
-        // Add calibration
+    function fmt(x) {
+      return x === null ? "null" : x.toFixed(1);
+    }
 
-        // --- Absolute-north calibration using deviceorientationabsolute ---
-        let alphaOffsetDeg = 0;        // what we'll add to event.alpha
-        let haveNorthOffset = false;
-        let firstRelAlpha = null;      // from your normal deviceorientation
-        let firstAbsAlpha = null;      // from deviceorientationabsolute (true north)
+    // ---- DEVICEORIENTATION ----
+    function onDO(e) {
+      logDiv.innerHTML = `
+        <b>deviceorientation</b><br>
+        absolute: ${e.absolute}<br>
+        alpha: ${fmt(e.alpha)}<br>
+        beta: ${fmt(e.beta)}<br>
+        gamma: ${fmt(e.gamma)}<br><br>
+      `;
+      console.log("deviceorientation", e);
+    }
 
-        // When we have both, compute the constant offset
-        function maybeCalibrateOffset() {
-          if (!haveNorthOffset && firstRelAlpha != null && firstAbsAlpha != null) {
-            alphaOffsetDeg = (firstAbsAlpha - firstRelAlpha + 360) % 360;
-            haveNorthOffset = true;
-            // console.log('calibrated alphaOffsetDeg =', alphaOffsetDeg);
+    // ---- DEVICEORIENTATIONABSOLUTE ----
+    function onDOA(e) {
+      logDiv.innerHTML += `
+        <b>deviceorientationabsolute</b><br>
+        aalpha: ${fmt(e.alpha)}<br>
+        abeta: ${fmt(e.beta)}<br>
+        agamma: ${fmt(e.gamma)}<br><br>
+      `;
+      console.log("deviceorientationabsolute", e);
+    }
+
+    // Request permission on iOS (won't affect Android)
+    if (typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function") {
+      DeviceOrientationEvent.requestPermission()
+        .then(res => {
+          if (res === "granted") {
+            window.addEventListener("deviceorientation", onDO, { passive: true });
+            window.addEventListener("deviceorientationabsolute", onDOA, { passive: true });
+          } else {
+            alert("Permission denied.");
           }
-        }
-
-        // Grab ONE "relative" alpha sample (same frame your current handler uses)
-        window.addEventListener(
-          "deviceorientation",
-          (e) => {
-            if (firstRelAlpha == null && typeof e.alpha === "number") {
-              firstRelAlpha = (e.alpha + 360) % 360;
-              maybeCalibrateOffset();
-            }
-          },
-          { passive: true }
-        );
-
-        // Prefer absolute heading when available (Chrome on Android)
-        if ("ondeviceorientationabsolute" in window) {
-          window.addEventListener(
-            "deviceorientationabsolute",
-            (e) => {
-              if (firstAbsAlpha == null && typeof e.alpha === "number") {
-                firstAbsAlpha = (e.alpha + 360) % 360; // 0..360, true-ish north
-                maybeCalibrateOffset();
-              }
-            },
-            true
-          );
-        } else {
-          // Fallback: some browsers expose absolute compass via webkitCompassHeading
-          window.addEventListener(
-            "deviceorientation",
-            (e) => {
-              if (
-                firstAbsAlpha == null &&
-                typeof e.webkitCompassHeading === "number"
-              ) {
-                firstAbsAlpha = (e.webkitCompassHeading + 360) % 360;
-                maybeCalibrateOffset();
-              }
-            },
-            true
-          );
-        }
+        });
+    } else {
+      // Android path – no need for permission
+      window.addEventListener("deviceorientation", onDO, { passive: true });
+      window.addEventListener("deviceorientationabsolute", onDOA, { passive: true });
+    }
+    </script>
+    <script>
         // Create World
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -102,40 +96,6 @@
         const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 }); // Red line, thickness 2
         const line = new THREE.Line(lineGeometry, lineMaterial);
         scene.add(line);
-
-
-        // Draw peaks
-
-        // const user = { lat: 37.7749, lon: -122.4194 }
-
-        // const peaks = [
-        //     {
-        //         name: "Mt Diablo",
-        //         lat: 13,
-        //         long: 124,
-        //     }
-        // ]
-
-        // peaks.forEach((peak) => {
-        //     // Calculate position using current lat/long and peak lat long
-
-        //     // Render something at that spot
-        //     const coneHeight = 2;               // or whatever looks good visually
-        //     const geometry = new THREE.ConeGeometry(1, coneHeight, 16);
-        //     const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        //     const cone = new THREE.Mesh(geometry, material);
-
-        //     // place on horizon ring
-        //     cone.position.set(
-        //       lineRadius * Math.cos(5),
-        //       coneHeight / 2,                   // raise so base touches horizon line
-        //       lineRadius * Math.sin(5)
-        //     );
-
-        //     // face inward toward viewer
-        //     cone.lookAt(0, cone.position.y, 0);
-        //     scene.add( cone );
-        // });  
 
         // Calculate position using current lat/long and peak lat long
         // //Calculate bearing from user to peak
@@ -293,14 +253,6 @@
 
         function onDeviceOrientation(event) {
           if (event.alpha == null) return;
-
-          // Normalize to 0..360
-          const rawAlpha = (event.alpha + 360) % 360;
-
-          // If we have an absolute-north offset, apply it
-          const alphaAdjDeg = haveNorthOffset
-            ? (rawAlpha + alphaOffsetDeg) % 360
-            : rawAlpha;
 
           const alphaRad = THREE.MathUtils.degToRad(event.alpha);
           const betaRad  = THREE.MathUtils.degToRad(event.beta);
