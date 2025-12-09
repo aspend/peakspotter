@@ -5,58 +5,6 @@
 </head>
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
-    <div id="log" style="position:fixed;top:0;left:0;background:white;padding:10px;z-index:9999;font-size:14px;">
-      Waiting for sensors…
-    </div>
-
-    <script>
-    const logDiv = document.getElementById("log");
-
-    function fmt(x) {
-      return x === null ? "null" : x.toFixed(1);
-    }
-
-    // ---- DEVICEORIENTATION ----
-    function onDO(e) {
-      logDiv.innerHTML = `
-        <b>deviceorientation</b><br>
-        absolute: ${e.absolute}<br>
-        alpha: ${fmt(e.alpha)}<br>
-        beta: ${fmt(e.beta)}<br>
-        gamma: ${fmt(e.gamma)}<br><br>
-      `;
-      console.log("deviceorientation", e);
-    }
-
-    // ---- DEVICEORIENTATIONABSOLUTE ----
-    function onDOA(e) {
-      logDiv.innerHTML += `
-        <b>deviceorientationabsolute</b><br>
-        aalpha: ${fmt(e.alpha)}<br>
-        abeta: ${fmt(e.beta)}<br>
-        agamma: ${fmt(e.gamma)}<br><br>
-      `;
-      console.log("deviceorientationabsolute", e);
-    }
-
-    // Request permission on iOS (won't affect Android)
-    if (typeof DeviceOrientationEvent !== "undefined" &&
-        typeof DeviceOrientationEvent.requestPermission === "function") {
-      DeviceOrientationEvent.requestPermission()
-        .then(res => {
-          if (res === "granted") {
-            window.addEventListener("deviceorientation", onDO, { passive: true });
-            window.addEventListener("deviceorientationabsolute", onDOA, { passive: true });
-          } else {
-            alert("Permission denied.");
-          }
-        });
-    } else {
-      // Android path – no need for permission
-      window.addEventListener("deviceorientation", onDO, { passive: true });
-      window.addEventListener("deviceorientationabsolute", onDOA, { passive: true });
-    }
-    </script>
     <script>
         // Create World
         const scene = new THREE.Scene();
@@ -277,7 +225,7 @@
           camera.quaternion.copy(quaternion);
         }
 
-        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
+        window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
 
     </script>
 </body>
