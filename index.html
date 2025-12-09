@@ -79,10 +79,10 @@
         // //draw mountains
         const user = { lat: 37.7380151, lon: -122.4299151 }; // you
         const peaks = [ 
-                        { name: "Mt Tam", lat: 37.923063, lon: -122.6162559, color: 0x0000ff }, // blue
-                        { name: "Mt Diablo", lat: 37.8818613, lon: -121.9193885, color: 0xff0000 }, // red
+                        { name: "Mt Tam", lat: 37.923063, lon: -122.6162559, ele: 744, color: 0x0000ff }, // blue
+                        { name: "Mt Diablo", lat: 37.8818613, lon: -121.9193885, ele: 1173, color: 0xff0000 }, // red
                       ];
-
+        const maxEle = 1173
         function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
           const canvas = document.createElement("canvas");
           canvas.width = canvas.height = 256;
@@ -104,9 +104,10 @@
         }
 
         peaks.forEach(p => {
-          const coneHeight = 2;
+          const distance = p.ele
+          const coneHeight = 10*p.ele/maxEle;
           const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(1, coneHeight, 16),
+            new THREE.ConeGeometry(coneHeight/2, coneHeight, 16),
             new THREE.MeshBasicMaterial({ color: p.color })
           );
           scene.add(cone);
