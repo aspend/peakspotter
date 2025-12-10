@@ -2,8 +2,54 @@
 <html>
 <head>
     <title>Peaks Viewer</title>
+    <style>
+      #location-panel {
+        position: fixed;
+        left: 50%;
+        bottom: 20px;
+        transform: translateX(-50%);
+        background: rgba(255,255,255,0.95);
+        border-radius: 8px;
+        padding: 10px 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        display: none;
+        z-index: 10;
+      }
+      #location-panel label {
+        margin-right: 4px;
+      }
+      #location-panel input {
+        width: 110px;
+        margin: 4px;
+        padding: 2px 4px;
+        font-size: 13px;
+      }
+      #location-panel button {
+        margin: 4px 4px 4px 0;
+        padding: 4px 8px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+    </style>
 </head>
 <body>
+    <!-- Panel that appears when phone points down -->
+    <div id="location-panel">
+      <div style="margin-bottom:4px; font-weight:600;">Set location</div>
+      <div>
+        <label for="lat-input">Lat:</label>
+        <input id="lat-input" type="number" step="0.000001">
+        <label for="lon-input">Lon:</label>
+        <input id="lon-input" type="number" step="0.000001">
+      </div>
+      <div style="margin-top:4px;">
+        <button id="apply-location">Apply</button>
+        <button id="reset-location">Reset to device</button>
+      </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
         // =====================
@@ -18,6 +64,19 @@
 
         // Default user location (fallback)
         let user = { lat: 37.7380151, lon: -122.4299151 };
+
+        // UI elements for location panel
+        const locationPanel = document.getElementById('location-panel');
+        const latInput      = document.getElementById('lat-input');
+        const lonInput      = document.getElementById('lon-input');
+        const applyBtn      = document.getElementById('apply-location');
+        const resetBtn      = document.getElementById('reset-location');
+
+        function updateLocationInputs() {
+          if (!latInput || !lonInput) return;
+          if (typeof user.lat === "number") latInput.value = user.lat.toFixed(6);
+          if (typeof user.lon === "number") lonInput.value = user.lon.toFixed(6);
+        }
 
         // Store peak objects for interaction
         const peakObjects = [];
@@ -332,7 +391,30 @@
         }
 
         // =====================
-        // 6. SELECTION APPEARANCE
+        // 6. CLEAR PEAKS
+        // =====================
+        function clearPeaks() {
+          peakObjects.forEach(entry => {
+            scene.remove(entry.tri);
+            scene.remove(entry.shade);
+            scene.remove(entry.leaderLine);
+            scene.remove(entry.label);
+
+            entry.tri.geometry.dispose();
+            entry.tri.material.dispose();
+            entry.shade.geometry.dispose();
+            entry.shade.material.dispose();
+            entry.leaderLine.geometry.dispose();
+            entry.leaderLine.material.dispose();
+            if (entry.label.material.map) entry.label.material.map.dispose();
+            entry.label.material.dispose();
+          });
+          peakObjects.length = 0;
+          selectedPeakEntry = null;
+        }
+
+        // =====================
+        // 7. SELECTION APPEARANCE
         // =====================
         function applySelection(selectedEntry) {
           if (!selectedEntry) {
@@ -381,7 +463,7 @@
         }
 
         // =====================
-        // 7. DRAW PEAKS
+        // 8. DRAW PEAKS
         // =====================
         function drawPeaks(peaks) {
           if (!peaks.length) {
@@ -504,9 +586,10 @@
         }
 
         // =====================
-        // 8. INIT PEAKS
+        // 9. INIT PEAKS
         // =====================
         function initPeaks() {
+          clearPeaks();
           const radiusMeters = 50000; // ~50 miles
           fetchPeaksFromOverpass(user.lat, user.lon, radiusMeters)
             .then(data => {
@@ -527,28 +610,58 @@
             });
         }
 
-        if (navigator.geolocation) {
+        function setUserToDeviceAndInit() {
+          if (!navigator.geolocation) {
+            alert("Geolocation not supported on this device.");
+            initPeaks();
+            return;
+          }
           navigator.geolocation.getCurrentPosition(
             pos => {
               user = {
                 lat: pos.coords.latitude,
                 lon: pos.coords.longitude
               };
+              updateLocationInputs();
               initPeaks();
             },
             err => {
-              console.warn("Geolocation failed, using default location:", err);
+              console.warn("Geolocation failed, using current or default location:", err);
+              updateLocationInputs();
               initPeaks();
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
           );
-        } else {
-          console.warn("Geolocation not supported, using default location.");
-          initPeaks();
+        }
+
+        // initial boot
+        setUserToDeviceAndInit();
+
+        // =====================
+        // 10. LOCATION PANEL BUTTONS
+        // =====================
+        if (applyBtn) {
+          applyBtn.addEventListener('click', () => {
+            const latVal = parseFloat(latInput.value);
+            const lonVal = parseFloat(lonInput.value);
+            if (!isFinite(latVal) || !isFinite(lonVal)) {
+              alert("Please enter valid numbers for latitude and longitude.");
+              return;
+            }
+            user.lat = latVal;
+            user.lon = lonVal;
+            initPeaks();
+          });
+        }
+
+        if (resetBtn) {
+          resetBtn.addEventListener('click', () => {
+            setUserToDeviceAndInit();
+          });
         }
 
         // =====================
-        // 9. COMPASS INDICATORS (N/E/S/W)
+        // 11. COMPASS INDICATORS (N/E/S/W)
         // =====================
         function makeDirectionIndicators(letter, color = "#000", fontPx = 72, size = 18) {
           const canvas = document.createElement("canvas");
@@ -595,7 +708,7 @@
         });
 
         // =====================
-        // 10. RENDER LOOP
+        // 12. RENDER LOOP
         // =====================
         function animate() {
           requestAnimationFrame(animate);
@@ -604,7 +717,7 @@
         animate();
 
         // =====================
-        // 11. DEVICE ORIENTATION → CAMERA
+        // 13. DEVICE ORIENTATION → CAMERA + PANEL SHOW/HIDE
         // =====================
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
         const quaternion = new THREE.Quaternion();
@@ -636,12 +749,25 @@
           quaternion.multiply(screenOrientationQuaternion);
 
           camera.quaternion.copy(quaternion);
+
+          // ---- Show panel when phone points down (toward bottom of cylinder) ----
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+          const lookingDown = forward.y < -0.5; // tweak threshold if needed
+
+          if (locationPanel) {
+            if (lookingDown) {
+              locationPanel.style.display = 'block';
+              updateLocationInputs();
+            } else {
+              locationPanel.style.display = 'none';
+            }
+          }
         }
 
         window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
 
         // =====================
-        // 12. CLICK HANDLER (CLICK TRIANGLE / SHADE)
+        // 14. CLICK HANDLER (CLICK TRIANGLE / SHADE)
         // =====================
         function onClick(event) {
           const rect = renderer.domElement.getBoundingClientRect();
