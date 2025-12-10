@@ -280,9 +280,18 @@
           return sprite;
         }
 
-        // Convenience: update label color for an entry
-        function setEntryLabelColor(entry, cssColor) {
-          const tex = buildPeakLabelTexture(entry.data.name, entry.subtitle, cssColor);
+        // Convenience: update label color + font sizes for an entry
+        function setEntryLabelStyle(
+          entry,
+          cssColor,
+          titleFontPx = 56,
+          subtitleFontPx = 32
+        ) {
+          const tex = buildPeakLabelTexture(entry.data.name, entry.subtitle, cssColor, {
+            titleFontPx,
+            subtitleFontPx,
+            angleDeg: -90
+          });
           if (entry.label.material.map) entry.label.material.map.dispose();
           entry.label.material.map = tex;
           entry.label.material.needsUpdate = true;
@@ -326,10 +335,10 @@
         // 6. SELECTION APPEARANCE
         // =====================
         // selectedEntry = null → everyone full color
-        // selectedEntry = some peak → that one full color, others grayscale + faded labels
+        // selectedEntry = some peak → that one full color & bigger text, others grayscale + faded labels
         function applySelection(selectedEntry) {
           if (!selectedEntry) {
-            // No selection: restore full color
+            // No selection: restore full color + normal labels
             peakObjects.forEach(entry => {
               entry.tri.material.color.set(entry.baseColor);
               entry.tri.material.needsUpdate = true;
@@ -338,7 +347,7 @@
               entry.shade.material.opacity = entry.baseOpacity;
               entry.shade.material.needsUpdate = true;
 
-              setEntryLabelColor(entry, entry.labelBaseColor);
+              setEntryLabelStyle(entry, entry.labelBaseColor); // default font sizes
             });
             selectedPeakEntry = null;
             return;
@@ -354,15 +363,16 @@
               entry.shade.material.color.set(entry.baseColor);
               entry.shade.material.opacity = entry.baseOpacity;
 
-              setEntryLabelColor(entry, entry.labelBaseColor);
+              // BIGGER font for selected peak: name + subtitle
+              setEntryLabelStyle(entry, entry.labelBaseColor, 72, 40);
             } else {
               // grayscale + slightly more transparent shading
               entry.tri.material.color.set(entry.grayColor);
               entry.shade.material.color.set(entry.grayColor);
               entry.shade.material.opacity = entry.baseOpacity * 0.5;
 
-              // light, semi-transparent gray label
-              setEntryLabelColor(entry, "rgba(160,160,160,0.35)");
+              // light, semi-transparent gray label (normal font size)
+              setEntryLabelStyle(entry, "rgba(160,160,160,0.35)", 56, 32);
             }
 
             entry.tri.material.needsUpdate = true;
@@ -607,7 +617,7 @@
           camera.quaternion.copy(quaternion);
         }
 
-        window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
+        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
 
         // =====================
         // 12. CLICK HANDLER (CLICK TRIANGLE / SHADE)
