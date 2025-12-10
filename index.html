@@ -54,7 +54,7 @@
         scene.add(line);
 
         // =====================
-        // 3. BEARING HELPERS
+        // 3. BEARING + DISTANCE HELPERS
         // =====================
         const toRad = d => d * Math.PI / 180;
         const toDeg = r => r * 180 / Math.PI;
@@ -84,7 +84,6 @@
           obj.lookAt(0, 0, 0);
         }
 
-        // add distance and vertical angle helpers
         // Great-circle distance in meters
         function haversineDistanceMeters(lat1, lon1, lat2, lon2) {
           const R = 6371000; // Earth radius in meters
@@ -104,19 +103,18 @@
 
         // Approximate vertical elevation angle from user → peak (radians)
         function verticalAngleRad(user, peak) {
-          const userEle = user.ele || 0;              // if you ever get real user elevation, put it here
+          const userEle = user.ele || 0; // if you ever get real user elevation, put it here
           const peakEle = peak.ele || userEle;
           const d = haversineDistanceMeters(user.lat, user.lon, peak.lat, peak.lon);
           if (d === 0) return 0;
-          const deltaH = peakEle - userEle;           // height difference in meters
-          return Math.atan2(deltaH, d);               // vertical angle above horizon
+          const deltaH = peakEle - userEle; // height difference in meters
+          return Math.atan2(deltaH, d);     // vertical angle above horizon
         }
 
-
-        // add visibility filter for peaks
+        // Visibility / dominant peaks filter
         function filterVisiblePeaks(peaks, user, options = {}) {
-          const binSizeDeg   = options.binSizeDeg   || 2;           // angular resolution
-          const minAngleRad  = options.minAngleRad  ?? -Infinity;   // set e.g. 0 to drop below-horizon peaks
+          const binSizeDeg   = options.binSizeDeg   || 2;         // angular resolution
+          const minAngleRad  = options.minAngleRad  ?? -Infinity; // set e.g. 0 to drop below-horizon peaks
 
           const withMeta = peaks.map(p => {
             const bearing = compassBearingDeg(user.lat, user.lon, p.lat, p.lon);
@@ -124,11 +122,9 @@
             return { ...p, bearing, vAngle };
           });
 
-          // Optionally drop stuff clearly below horizon:
           const candidates = withMeta.filter(p => p.vAngle >= minAngleRad);
 
           const bestByBin = new Map();
-
           candidates.forEach(p => {
             const bin = Math.round(p.bearing / binSizeDeg) * binSizeDeg;
             const current = bestByBin.get(bin);
@@ -140,11 +136,10 @@
           return Array.from(bestByBin.values());
         }
 
-
         // =====================
         // 4. PEAK GEOMETRY + LABELS
         // =====================
-        function makeTrianglePeak(height, width, color = 0x000000) {
+        function makeTrianglePeak(height, width, color = 0x000000, thickness = 1) {
           const halfW = width / 2;
           const points = [
             new THREE.Vector3(-halfW, 0, 0),
@@ -154,118 +149,110 @@
           ];
 
           const geom = new THREE.BufferGeometry().setFromPoints(points);
-          const mat  = new THREE.LineBasicMaterial({ color });
+          const mat  = new THREE.LineBasicMaterial({
+            color,
+            linewidth: thickness   // may be ignored on some platforms
+          });
           return new THREE.Line(geom, mat);
         }
 
-        // function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
-        //   const canvas = document.createElement("canvas");
-        //   canvas.width = canvas.height = 256;
-        //   const ctx = canvas.getContext("2d");
+        // NEW: filled, transparent triangle for shading
+        function makeFilledPeakTriangle(height, width, color = 0x0000ff, opacity = 0.25) {
+          const halfW = width / 2;
 
-        //   ctx.clearRect(0, 0, 256, 256);
-        //   ctx.fillStyle = color;
-        //   ctx.textAlign = "center";
-        //   ctx.textBaseline = "middle";
-        //   ctx.font = `bold ${fontPx}px sans-serif`;
-        //   ctx.fillText(text, 128, 128);
+          const vertices = new Float32Array([
+            -halfW, 0,     0,
+             halfW, 0,     0,
+             0,     height, 0
+          ]);
 
-        //   const texture = new THREE.CanvasTexture(canvas);
-        //   const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
-        //   const sprite = new THREE.Sprite(material);
+          const geom = new THREE.BufferGeometry();
+          geom.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
 
-        //   sprite.scale.set(size, size * 2, 2);
-        //   return sprite;
-        // }
+          const mat = new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity,
+            depthWrite: false,      // so fills don't stack and darken each other as much
+            side: THREE.DoubleSide
+          });
 
-//         function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
-//           const canvas = document.createElement("canvas");
-//           canvas.width = canvas.height = 256;
-//           const ctx = canvas.getContext("2d");
+          return new THREE.Mesh(geom, mat);
+        }
 
-//           ctx.clearRect(0, 0, 256, 256);
-//           ctx.fillStyle = color;
-//           ctx.textAlign = "center";
-//           ctx.textBaseline = "middle";
-//           ctx.font = `bold ${fontPx}px sans-serif`;
-
-//           // ---- ROTATE SLIGHTLY OFF-VERTICAL ----
-//           // Full vertical = -90° (straight up/down)
-//           // 30° off vertical = -60°
-//           const angle = -60 * Math.PI / 180;  // -60 degrees
-//           ctx.save();
-//           ctx.translate(canvas.width / 2, canvas.height / 2);
-//           ctx.rotate(angle);
-//           ctx.fillText(text, 0, 0);
-//           ctx.restore();
-
-//           const texture = new THREE.CanvasTexture(canvas);
-//           const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
-//           const sprite = new THREE.Sprite(material);
-
-//           // Taller scale since text is angled
-//           sprite.scale.set(size, size * 3, 1);
-
-//           return sprite;
-// }
         function makePeakLabel(
-          text,
+          name,
+          subtitle,                 // e.g. "12.3 mi · 8,945 ft"
           color = "#000",
           {
-            fontPx = 48,      // base font size in CSS pixels
-            sizeWorld = 12,   // how big the label is in your 3D world units
-            angleDeg = -60    // rotation of the text on the canvas (30° off vertical)
+            titleFontPx = 56,       // big main label size (CSS px)
+            subtitleFontPx = 32,    // smaller line under it
+            sizeWorld = 14,         // how big the sprite is in world units
+            angleDeg = -90          // vertical
           } = {}
         ) {
           const dpr = window.devicePixelRatio || 1;
 
-          // Logical canvas size in CSS pixels (we'll scale by DPR for sharpness)
-          const logicalSize = 512;
+          const logicalSize = 512;               // canvas coords used in drawing
           const canvas = document.createElement("canvas");
-          canvas.width = logicalSize * dpr;
+          canvas.width  = logicalSize * dpr;     // actual pixel backing store
           canvas.height = logicalSize * dpr;
 
           const ctx = canvas.getContext("2d");
 
-          // Map 0..logicalSize coords to the high-res backing store
+          // Map logical coordinates → hi-res backing store
           ctx.scale(dpr, dpr);
 
-          // Clean, modern font
           ctx.clearRect(0, 0, logicalSize, logicalSize);
           ctx.fillStyle = color;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
 
-          // We'll possibly shrink the font if the word is too long
-          let currentFontPx = fontPx;
-          const setFont = () => {
-            ctx.font = `600 ${currentFontPx}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-          };
-          setFont();
+          const padding = 40;
 
-          // Measure and auto-shrink to avoid clipping
-          const padding = 40; // leave margin so rotated text doesn't hit the canvas edge
-          let metrics = ctx.measureText(text);
-          let textWidth = metrics.width;
+          let titleSize   = titleFontPx;
+          let subtitleSize = subtitleFontPx;
+
+          const fontStack = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+          const setFonts = () => {
+            ctx.font = `normal normal 600 ${titleSize}px ${fontStack}`;
+          };
+
+          setFonts();
+
+          // Measure main text width and shrink if needed to avoid clipping when rotated
           const maxWidth = logicalSize - 2 * padding;
+          let metrics = ctx.measureText(name);
+          let textWidth = metrics.width;
 
           if (textWidth > maxWidth) {
             const scale = maxWidth / textWidth;
-            currentFontPx = currentFontPx * scale;
-            setFont();
-            metrics = ctx.measureText(text);
-            textWidth = metrics.width;
+            titleSize    *= scale;
+            subtitleSize *= scale;
           }
 
-          // Rotate slightly off vertical and draw text
+          // Draw rotated text (name + subtitle)
           ctx.save();
           ctx.translate(logicalSize / 2, logicalSize / 2);
-          const angleRad = angleDeg * Math.PI / 180; // e.g. -60°
+          const angleRad = angleDeg * Math.PI / 180;
           ctx.rotate(angleRad);
-          ctx.fillText(text, 0, 0);
+
+          // Vertical offset between lines (in rotated space)
+          const lineGap = titleSize * 0.9;
+
+          // Title (top)
+          ctx.font = `normal normal 600 ${titleSize}px ${fontStack}`;
+          ctx.fillText(name, 0, -lineGap / 2);
+
+          // Subtitle (bottom, smaller)
+          if (subtitle) {
+            ctx.font = `normal normal 400 ${subtitleSize}px ${fontStack}`;
+            ctx.fillText(subtitle, 0, lineGap / 2 + subtitleSize * 0.1);
+          }
+
           ctx.restore();
 
-          // Create THREE texture with better filtering
           const texture = new THREE.CanvasTexture(canvas);
           texture.minFilter = THREE.LinearFilter;
           texture.magFilter = THREE.LinearFilter;
@@ -282,18 +269,15 @@
 
           const sprite = new THREE.Sprite(material);
 
-          // World size of the label: keep this roughly proportional to what you want on-screen
+          // Taller than wide: fits the tilted two-line label nicely
           sprite.scale.set(sizeWorld, sizeWorld * 3, 1);
 
           return sprite;
         }
 
-
         // =====================
         // 5. OVERPASS API: FETCH PEAKS
         // =====================
-
-        // Fetch "natural=peak" within radiusMeters of (lat, lon)
         function fetchPeaksFromOverpass(lat, lon, radiusMeters = 50000) {
           const query = `
             [out:json][timeout:25];
@@ -307,7 +291,6 @@
           }).then(res => res.json());
         }
 
-        // Convert Overpass JSON -> peaks array in your format
         function buildPeaksFromOverpass(json) {
           if (!json.elements) return [];
 
@@ -327,7 +310,13 @@
             });
         }
 
-        // Draw peaks (triangles + labels) once we have them
+        // =====================
+        // 6. DRAW PEAKS
+        // =====================
+        // Peaks are:
+        //   - colored by distance: near = red, far = blue
+        //   - thicker lines when near, thinner when far
+        //   - shaded with transparent fills (more opaque when near)
         function drawPeaks(peaks) {
           if (!peaks.length) {
             console.warn("No peaks found from Overpass.");
@@ -336,27 +325,60 @@
 
           const maxEle = Math.max(...peaks.map(p => p.ele || 1));
 
+          // Color gradient: closest peaks = red, farthest peaks = blue
+          const nearColor = new THREE.Color(0xff0000); // red (close)
+          const farColor  = new THREE.Color(0x0000ff); // blue (far)
+
+          // Precompute distance for each peak
           peaks.forEach(p => {
-            // 1) decide mountain visual size in world units
-            const height = 10 * p.ele / maxEle;   // same idea as before
+            const distMeters = haversineDistanceMeters(user.lat, user.lon, p.lat, p.lon);
+            p._distMeters = distMeters;
+          });
+
+          const maxDist = Math.max(...peaks.map(p => p._distMeters || 1));
+
+          peaks.forEach(p => {
+            // 1) mountain visual size in world units
+            const height = 10 * p.ele / maxEle;
             const width  = 3;
 
-            // 2) create triangle outline and place it on the horizon
-            const tri = makeTrianglePeak(height, width, p.color || 0x0000ff);
+            // 2) distance -> 0..1   (t=0 near, t=1 far)
+            const d = p._distMeters;
+            const t = Math.min(1, d / maxDist);
+
+            // 3) color from gradient
+            const col = nearColor.clone().lerp(farColor, t);
+            const colHex = col.getHex();
+
+            // 4) line thickness based on distance
+            const maxThickness = 6;  // closest
+            const minThickness = 1;  // farthest
+            const thickness = maxThickness - t * (maxThickness - minThickness);
+
+            // 5) outline triangle
+            const tri = makeTrianglePeak(height, width, colHex, thickness);
             scene.add(tri);
             placePeakOnHorizon(tri, user, p, lineRadius, height);
 
-            // 3) find the peak TIP in world coordinates
-            // local tip is (0, height, 0) in the triangle’s own space
+            // 6) transparent filled triangle for shading
+            let shadeOpacity = 0.35 - 0.25 * t;           // 0.35 near → ~0.10 far
+            shadeOpacity = Math.max(0.05, shadeOpacity);  // avoid fully invisible
+
+            const shade = makeFilledPeakTriangle(height, width, colHex, shadeOpacity);
+            shade.position.copy(tri.position);
+            shade.rotation.copy(tri.rotation);
+            shade.position.y -= 0.05; // nudge "behind" the line a bit
+            scene.add(shade);
+
+            // 7) find the peak TIP in world coordinates
             const tipLocal = new THREE.Vector3(0, height, 0);
             const tipWorld = tri.localToWorld(tipLocal.clone());
 
-            // 4) define where the label should go:
-            //    move "up" in world Y from the tip (toward top of screen when horizon is centered)
-            const labelOffset = 30; // tweak this number to move label higher/lower
+            // 8) label position (above the tip)
+            const labelOffset = 30;
             const labelPos = tipWorld.clone().add(new THREE.Vector3(0, labelOffset, 0));
 
-            // 5) draw a line from peak tip to label position
+            // 9) line from peak tip to label
             const leaderGeom = new THREE.BufferGeometry().setFromPoints([
               tipWorld,
               labelPos
@@ -365,36 +387,36 @@
             const leaderLine = new THREE.Line(leaderGeom, leaderMat);
             scene.add(leaderLine);
 
-            // 6) create label at the end of that line
-            const label = makePeakLabel(p.name, "#000");
+            // 10) distance & elevation text for subtitle
+            const distMiles = d / 1609.34;
+            const distStr = distMiles.toFixed(1) + " mi";
+
+            const eleMeters = p.ele || 0;
+            const eleFeet = eleMeters * 3.28084;
+            const eleStr = Math.round(eleFeet).toLocaleString() + " ft";
+
+            const subtitle = `${distStr} · ${eleStr}`;
+
+            // 11) label at the end of that line
+            const label = makePeakLabel(p.name, subtitle, "#000");
             label.position.copy(labelPos);
             scene.add(label);
           });
         }
 
         // =====================
-        // 6. GET USER LOCATION, THEN LOAD PEAKS
+        // 7. GET USER LOCATION, THEN LOAD PEAKS
         // =====================
-        // function initPeaks() {
-        //   const radiusMeters = 50000; // ~50 miles
-        //   fetchPeaksFromOverpass(user.lat, user.lon, radiusMeters)
-        //     .then(data => {
-        //       const peaks = buildPeaksFromOverpass(data);
-        //       drawPeaks(peaks);
-        //     })
-        //     .catch(err => {
-        //       console.error("Error fetching peaks from Overpass:", err);
-        //     });
-        // }
-
-
         function initPeaks() {
           const radiusMeters = 50000; // ~50 miles
           fetchPeaksFromOverpass(user.lat, user.lon, radiusMeters)
             .then(data => {
               let peaks = buildPeaksFromOverpass(data);
 
-              // ⬇️ reduce to “visible” / dominant peaks
+              // disregard peaks with no name / "unnamed"
+              peaks = peaks.filter(p => p.name && !p.name.toLowerCase().includes("unnamed"));
+
+              // reduce to “visible” / dominant peaks
               peaks = filterVisiblePeaks(peaks, user, {
                 binSizeDeg: 2,      // try 1–5° and see what looks good
                 minAngleRad: 0      // 0 = only above-horizon; use -Infinity to keep all
@@ -408,7 +430,6 @@
             });
         }
 
-        // Try to get real device location; fall back to default if denied
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             pos => {
@@ -430,7 +451,7 @@
         }
 
         // =====================
-        // 7. COMPASS INDICATORS (N/E/S/W)
+        // 8. COMPASS INDICATORS (N/E/S/W)
         // =====================
         function makeDirectionIndicators(letter, color = "#000", fontPx = 72, size = 18) {
           const canvas = document.createElement("canvas");
@@ -477,7 +498,7 @@
         });
 
         // =====================
-        // 8. RENDER LOOP
+        // 9. RENDER LOOP
         // =====================
         function animate() {
           requestAnimationFrame(animate);
@@ -486,7 +507,7 @@
         animate();
 
         // =====================
-        // 9. DEVICE ORIENTATION → CAMERA
+        // 10. DEVICE ORIENTATION → CAMERA
         // =====================
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
         const quaternion = new THREE.Quaternion();
