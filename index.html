@@ -16,8 +16,16 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Default user location (fallback: your old hardcoded one)
+        // Default user location (fallback)
         let user = { lat: 37.7380151, lon: -122.4299151 };
+
+        // Store peak objects for interaction
+        const peakObjects = [];
+        let selectedPeakEntry = null;
+
+        // Raycaster for clicks
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
 
         // =====================
         // 2. CYLINDER + HORIZON
@@ -77,7 +85,7 @@
 
           obj.position.set(
             radius * Math.cos(ang),
-            0, // base on horizon
+            0,
             radius * Math.sin(ang)
           );
 
@@ -103,18 +111,18 @@
 
         // Approximate vertical elevation angle from user → peak (radians)
         function verticalAngleRad(user, peak) {
-          const userEle = user.ele || 0; // if you ever get real user elevation, put it here
+          const userEle = user.ele || 0;
           const peakEle = peak.ele || userEle;
           const d = haversineDistanceMeters(user.lat, user.lon, peak.lat, peak.lon);
           if (d === 0) return 0;
-          const deltaH = peakEle - userEle; // height difference in meters
-          return Math.atan2(deltaH, d);     // vertical angle above horizon
+          const deltaH = peakEle - userEle;
+          return Math.atan2(deltaH, d);
         }
 
         // Visibility / dominant peaks filter
         function filterVisiblePeaks(peaks, user, options = {}) {
-          const binSizeDeg   = options.binSizeDeg   || 2;         // angular resolution
-          const minAngleRad  = options.minAngleRad  ?? -Infinity; // set e.g. 0 to drop below-horizon peaks
+          const binSizeDeg   = options.binSizeDeg   || 2;
+          const minAngleRad  = options.minAngleRad  ?? -Infinity;
 
           const withMeta = peaks.map(p => {
             const bearing = compassBearingDeg(user.lat, user.lon, p.lat, p.lon);
@@ -151,12 +159,12 @@
           const geom = new THREE.BufferGeometry().setFromPoints(points);
           const mat  = new THREE.LineBasicMaterial({
             color,
-            linewidth: thickness   // may be ignored on some platforms
+            linewidth: thickness // may be ignored on some platforms
           });
           return new THREE.Line(geom, mat);
         }
 
-        // NEW: filled, transparent triangle for shading
+        // Filled, transparent triangle for shading
         function makeFilledPeakTriangle(height, width, color = 0x0000ff, opacity = 0.25) {
           const halfW = width / 2;
 
@@ -173,34 +181,32 @@
             color,
             transparent: true,
             opacity,
-            depthWrite: false,      // so fills don't stack and darken each other as much
+            depthWrite: false,
             side: THREE.DoubleSide
           });
 
           return new THREE.Mesh(geom, mat);
         }
 
-        function makePeakLabel(
+        // Helper: build label texture only
+        function buildPeakLabelTexture(
           name,
-          subtitle,                 // e.g. "12.3 mi · 8,945 ft"
+          subtitle,
           color = "#000",
           {
-            titleFontPx = 56,       // big main label size (CSS px)
-            subtitleFontPx = 32,    // smaller line under it
-            sizeWorld = 14,         // how big the sprite is in world units
-            angleDeg = -90          // vertical
+            titleFontPx = 56,
+            subtitleFontPx = 32,
+            angleDeg = -90,   // vertical
           } = {}
         ) {
           const dpr = window.devicePixelRatio || 1;
+          const logicalSize = 512;
 
-          const logicalSize = 512;               // canvas coords used in drawing
           const canvas = document.createElement("canvas");
-          canvas.width  = logicalSize * dpr;     // actual pixel backing store
+          canvas.width  = logicalSize * dpr;
           canvas.height = logicalSize * dpr;
 
           const ctx = canvas.getContext("2d");
-
-          // Map logical coordinates → hi-res backing store
           ctx.scale(dpr, dpr);
 
           ctx.clearRect(0, 0, logicalSize, logicalSize);
@@ -209,19 +215,12 @@
           ctx.textBaseline = "middle";
 
           const padding = 40;
-
           let titleSize   = titleFontPx;
           let subtitleSize = subtitleFontPx;
-
           const fontStack = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
-          const setFonts = () => {
-            ctx.font = `normal normal 600 ${titleSize}px ${fontStack}`;
-          };
+          ctx.font = `normal normal 600 ${titleSize}px ${fontStack}`;
 
-          setFonts();
-
-          // Measure main text width and shrink if needed to avoid clipping when rotated
           const maxWidth = logicalSize - 2 * padding;
           let metrics = ctx.measureText(name);
           let textWidth = metrics.width;
@@ -232,20 +231,16 @@
             subtitleSize *= scale;
           }
 
-          // Draw rotated text (name + subtitle)
           ctx.save();
           ctx.translate(logicalSize / 2, logicalSize / 2);
           const angleRad = angleDeg * Math.PI / 180;
           ctx.rotate(angleRad);
 
-          // Vertical offset between lines (in rotated space)
           const lineGap = titleSize * 0.9;
 
-          // Title (top)
           ctx.font = `normal normal 600 ${titleSize}px ${fontStack}`;
           ctx.fillText(name, 0, -lineGap / 2);
 
-          // Subtitle (bottom, smaller)
           if (subtitle) {
             ctx.font = `normal normal 400 ${subtitleSize}px ${fontStack}`;
             ctx.fillText(subtitle, 0, lineGap / 2 + subtitleSize * 0.1);
@@ -262,17 +257,35 @@
               : 1);
           texture.needsUpdate = true;
 
+          return texture;
+        }
+
+        // Sprite builder that uses the texture helper
+        function makePeakLabel(
+          name,
+          subtitle,
+          color = "#000",
+          {
+            sizeWorld = 14,
+            angleDeg = -90
+          } = {}
+        ) {
+          const texture = buildPeakLabelTexture(name, subtitle, color, { angleDeg });
           const material = new THREE.SpriteMaterial({
             map: texture,
             transparent: true
           });
-
           const sprite = new THREE.Sprite(material);
-
-          // Taller than wide: fits the tilted two-line label nicely
           sprite.scale.set(sizeWorld, sizeWorld * 3, 1);
-
           return sprite;
+        }
+
+        // Convenience: update label color for an entry
+        function setEntryLabelColor(entry, cssColor) {
+          const tex = buildPeakLabelTexture(entry.data.name, entry.subtitle, cssColor);
+          if (entry.label.material.map) entry.label.material.map.dispose();
+          entry.label.material.map = tex;
+          entry.label.material.needsUpdate = true;
         }
 
         // =====================
@@ -284,7 +297,6 @@
             node["natural"="peak"](around:${radiusMeters},${lat},${lon});
             out body;
           `;
-
           return fetch("https://overpass-api.de/api/interpreter", {
             method: "POST",
             body: query
@@ -304,19 +316,65 @@
                 name: tags.name || "Unnamed peak",
                 lat: el.lat,
                 lon: el.lon,
-                ele: Number.isFinite(ele) ? ele : 1000, // fallback if no elevation
+                ele: Number.isFinite(ele) ? ele : 1000,
                 color: 0x0000ff
               };
             });
         }
 
         // =====================
-        // 6. DRAW PEAKS
+        // 6. SELECTION APPEARANCE
         // =====================
-        // Peaks are:
-        //   - colored by distance: near = red, far = blue
-        //   - thicker lines when near, thinner when far
-        //   - shaded with transparent fills (more opaque when near)
+        // selectedEntry = null → everyone full color
+        // selectedEntry = some peak → that one full color, others grayscale + faded labels
+        function applySelection(selectedEntry) {
+          if (!selectedEntry) {
+            // No selection: restore full color
+            peakObjects.forEach(entry => {
+              entry.tri.material.color.set(entry.baseColor);
+              entry.tri.material.needsUpdate = true;
+
+              entry.shade.material.color.set(entry.baseColor);
+              entry.shade.material.opacity = entry.baseOpacity;
+              entry.shade.material.needsUpdate = true;
+
+              setEntryLabelColor(entry, entry.labelBaseColor);
+            });
+            selectedPeakEntry = null;
+            return;
+          }
+
+          // There is a selected entry
+          peakObjects.forEach(entry => {
+            const isSelected = (entry === selectedEntry);
+
+            if (isSelected) {
+              // keep original distance-based color & opacity
+              entry.tri.material.color.set(entry.baseColor);
+              entry.shade.material.color.set(entry.baseColor);
+              entry.shade.material.opacity = entry.baseOpacity;
+
+              setEntryLabelColor(entry, entry.labelBaseColor);
+            } else {
+              // grayscale + slightly more transparent shading
+              entry.tri.material.color.set(entry.grayColor);
+              entry.shade.material.color.set(entry.grayColor);
+              entry.shade.material.opacity = entry.baseOpacity * 0.5;
+
+              // light, semi-transparent gray label
+              setEntryLabelColor(entry, "rgba(160,160,160,0.35)");
+            }
+
+            entry.tri.material.needsUpdate = true;
+            entry.shade.material.needsUpdate = true;
+          });
+
+          selectedPeakEntry = selectedEntry;
+        }
+
+        // =====================
+        // 7. DRAW PEAKS
+        // =====================
         function drawPeaks(peaks) {
           if (!peaks.length) {
             console.warn("No peaks found from Overpass.");
@@ -325,11 +383,11 @@
 
           const maxEle = Math.max(...peaks.map(p => p.ele || 1));
 
-          // Color gradient: closest peaks = red, farthest peaks = blue
+          // Color gradient: near = red, far = blue (base colors)
           const nearColor = new THREE.Color(0xff0000); // red (close)
           const farColor  = new THREE.Color(0x0000ff); // blue (far)
 
-          // Precompute distance for each peak
+          // distances
           peaks.forEach(p => {
             const distMeters = haversineDistanceMeters(user.lat, user.lon, p.lat, p.lon);
             p._distMeters = distMeters;
@@ -338,47 +396,44 @@
           const maxDist = Math.max(...peaks.map(p => p._distMeters || 1));
 
           peaks.forEach(p => {
-            // 1) mountain visual size in world units
             const height = 10 * p.ele / maxEle;
             const width  = 3;
 
-            // 2) distance -> 0..1   (t=0 near, t=1 far)
             const d = p._distMeters;
-            const t = Math.min(1, d / maxDist);
+            const t = Math.min(1, d / maxDist); // 0 near, 1 far
 
-            // 3) color from gradient
             const col = nearColor.clone().lerp(farColor, t);
             const colHex = col.getHex();
 
-            // 4) line thickness based on distance
-            const maxThickness = 6;  // closest
-            const minThickness = 1;  // farthest
+            // grayscale version for non-selected state
+            const hsl = { h: 0, s: 0, l: 0 };
+            col.getHSL(hsl);
+            const gray = new THREE.Color().setHSL(0, 0, hsl.l);
+            const grayHex = gray.getHex();
+
+            const maxThickness = 6;
+            const minThickness = 1;
             const thickness = maxThickness - t * (maxThickness - minThickness);
 
-            // 5) outline triangle
             const tri = makeTrianglePeak(height, width, colHex, thickness);
             scene.add(tri);
             placePeakOnHorizon(tri, user, p, lineRadius, height);
 
-            // 6) transparent filled triangle for shading
-            let shadeOpacity = 0.35 - 0.25 * t;           // 0.35 near → ~0.10 far
-            shadeOpacity = Math.max(0.05, shadeOpacity);  // avoid fully invisible
+            let shadeOpacity = 0.35 - 0.25 * t;
+            shadeOpacity = Math.max(0.05, shadeOpacity);
 
             const shade = makeFilledPeakTriangle(height, width, colHex, shadeOpacity);
             shade.position.copy(tri.position);
             shade.rotation.copy(tri.rotation);
-            shade.position.y -= 0.05; // nudge "behind" the line a bit
+            shade.position.y -= 0.05;
             scene.add(shade);
 
-            // 7) find the peak TIP in world coordinates
             const tipLocal = new THREE.Vector3(0, height, 0);
             const tipWorld = tri.localToWorld(tipLocal.clone());
 
-            // 8) label position (above the tip)
             const labelOffset = 30;
             const labelPos = tipWorld.clone().add(new THREE.Vector3(0, labelOffset, 0));
 
-            // 9) line from peak tip to label
             const leaderGeom = new THREE.BufferGeometry().setFromPoints([
               tipWorld,
               labelPos
@@ -387,7 +442,6 @@
             const leaderLine = new THREE.Line(leaderGeom, leaderMat);
             scene.add(leaderLine);
 
-            // 10) distance & elevation text for subtitle
             const distMiles = d / 1609.34;
             const distStr = distMiles.toFixed(1) + " mi";
 
@@ -397,15 +451,29 @@
 
             const subtitle = `${distStr} · ${eleStr}`;
 
-            // 11) label at the end of that line
-            const label = makePeakLabel(p.name, subtitle, "#000");
+            const labelBaseColor = "#000000";
+            const label = makePeakLabel(p.name, subtitle, labelBaseColor);
             label.position.copy(labelPos);
             scene.add(label);
+
+            // store for interaction
+            peakObjects.push({
+              data: p,
+              tri,
+              shade,
+              leaderLine,
+              label,
+              baseColor: colHex,
+              grayColor: grayHex,
+              baseOpacity: shadeOpacity,
+              subtitle,
+              labelBaseColor
+            });
           });
         }
 
         // =====================
-        // 7. GET USER LOCATION, THEN LOAD PEAKS
+        // 8. INIT PEAKS
         // =====================
         function initPeaks() {
           const radiusMeters = 50000; // ~50 miles
@@ -413,13 +481,11 @@
             .then(data => {
               let peaks = buildPeaksFromOverpass(data);
 
-              // disregard peaks with no name / "unnamed"
               peaks = peaks.filter(p => p.name && !p.name.toLowerCase().includes("unnamed"));
 
-              // reduce to “visible” / dominant peaks
               peaks = filterVisiblePeaks(peaks, user, {
-                binSizeDeg: 2,      // try 1–5° and see what looks good
-                minAngleRad: 0      // 0 = only above-horizon; use -Infinity to keep all
+                binSizeDeg: 2,
+                minAngleRad: 0
               });
 
               console.log("Peaks after visibility filter:", peaks.length);
@@ -451,7 +517,7 @@
         }
 
         // =====================
-        // 8. COMPASS INDICATORS (N/E/S/W)
+        // 9. COMPASS INDICATORS (N/E/S/W)
         // =====================
         function makeDirectionIndicators(letter, color = "#000", fontPx = 72, size = 18) {
           const canvas = document.createElement("canvas");
@@ -498,7 +564,7 @@
         });
 
         // =====================
-        // 9. RENDER LOOP
+        // 10. RENDER LOOP
         // =====================
         function animate() {
           requestAnimationFrame(animate);
@@ -507,7 +573,7 @@
         animate();
 
         // =====================
-        // 10. DEVICE ORIENTATION → CAMERA
+        // 11. DEVICE ORIENTATION → CAMERA
         // =====================
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
         const quaternion = new THREE.Quaternion();
@@ -542,6 +608,39 @@
         }
 
         window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
+
+        // =====================
+        // 12. CLICK HANDLER (CLICK TRIANGLE / SHADE)
+        // =====================
+        function onClick(event) {
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+          raycaster.setFromCamera(mouse, camera);
+
+          // Clickable: triangle outline + shaded fill
+          const clickTargets = [];
+          peakObjects.forEach(p => {
+            clickTargets.push(p.tri, p.shade);
+          });
+
+          const intersects = raycaster.intersectObjects(clickTargets, true);
+          if (!intersects.length) return;
+
+          const clickedObj = intersects[0].object;
+          const entry = peakObjects.find(p => p.tri === clickedObj || p.shade === clickedObj);
+          if (!entry) return;
+
+          // toggle if clicking the same one again
+          if (selectedPeakEntry === entry) {
+            applySelection(null);
+          } else {
+            applySelection(entry);
+          }
+        }
+
+        renderer.domElement.addEventListener('click', onClick, false);
     </script>
 </body>
 </html>
