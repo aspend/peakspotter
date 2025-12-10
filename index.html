@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Three.js Peaks Viewer</title>
+    <title>Peaks Viewer</title>
 </head>
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
@@ -84,6 +84,63 @@
           obj.lookAt(0, 0, 0);
         }
 
+        // add distance and vertical angle helpers
+        // Great-circle distance in meters
+        function haversineDistanceMeters(lat1, lon1, lat2, lon2) {
+          const R = 6371000; // Earth radius in meters
+          const φ1 = toRad(lat1);
+          const φ2 = toRad(lat2);
+          const Δφ = toRad(lat2 - lat1);
+          const Δλ = toRad(lon2 - lon1);
+
+          const a =
+            Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return R * c;
+        }
+
+        // Approximate vertical elevation angle from user → peak (radians)
+        function verticalAngleRad(user, peak) {
+          const userEle = user.ele || 0;              // if you ever get real user elevation, put it here
+          const peakEle = peak.ele || userEle;
+          const d = haversineDistanceMeters(user.lat, user.lon, peak.lat, peak.lon);
+          if (d === 0) return 0;
+          const deltaH = peakEle - userEle;           // height difference in meters
+          return Math.atan2(deltaH, d);               // vertical angle above horizon
+        }
+
+
+        // add visibility filter for peaks
+        function filterVisiblePeaks(peaks, user, options = {}) {
+          const binSizeDeg   = options.binSizeDeg   || 2;           // angular resolution
+          const minAngleRad  = options.minAngleRad  ?? -Infinity;   // set e.g. 0 to drop below-horizon peaks
+
+          const withMeta = peaks.map(p => {
+            const bearing = compassBearingDeg(user.lat, user.lon, p.lat, p.lon);
+            const vAngle  = verticalAngleRad(user, p);
+            return { ...p, bearing, vAngle };
+          });
+
+          // Optionally drop stuff clearly below horizon:
+          const candidates = withMeta.filter(p => p.vAngle >= minAngleRad);
+
+          const bestByBin = new Map();
+
+          candidates.forEach(p => {
+            const bin = Math.round(p.bearing / binSizeDeg) * binSizeDeg;
+            const current = bestByBin.get(bin);
+            if (!current || p.vAngle > current.vAngle) {
+              bestByBin.set(bin, p);
+            }
+          });
+
+          return Array.from(bestByBin.values());
+        }
+
+
         // =====================
         // 4. PEAK GEOMETRY + LABELS
         // =====================
@@ -101,32 +158,143 @@
           return new THREE.Line(geom, mat);
         }
 
-        function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
+        // function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
+        //   const canvas = document.createElement("canvas");
+        //   canvas.width = canvas.height = 256;
+        //   const ctx = canvas.getContext("2d");
+
+        //   ctx.clearRect(0, 0, 256, 256);
+        //   ctx.fillStyle = color;
+        //   ctx.textAlign = "center";
+        //   ctx.textBaseline = "middle";
+        //   ctx.font = `bold ${fontPx}px sans-serif`;
+        //   ctx.fillText(text, 128, 128);
+
+        //   const texture = new THREE.CanvasTexture(canvas);
+        //   const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+        //   const sprite = new THREE.Sprite(material);
+
+        //   sprite.scale.set(size, size * 2, 2);
+        //   return sprite;
+        // }
+
+//         function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
+//           const canvas = document.createElement("canvas");
+//           canvas.width = canvas.height = 256;
+//           const ctx = canvas.getContext("2d");
+
+//           ctx.clearRect(0, 0, 256, 256);
+//           ctx.fillStyle = color;
+//           ctx.textAlign = "center";
+//           ctx.textBaseline = "middle";
+//           ctx.font = `bold ${fontPx}px sans-serif`;
+
+//           // ---- ROTATE SLIGHTLY OFF-VERTICAL ----
+//           // Full vertical = -90° (straight up/down)
+//           // 30° off vertical = -60°
+//           const angle = -60 * Math.PI / 180;  // -60 degrees
+//           ctx.save();
+//           ctx.translate(canvas.width / 2, canvas.height / 2);
+//           ctx.rotate(angle);
+//           ctx.fillText(text, 0, 0);
+//           ctx.restore();
+
+//           const texture = new THREE.CanvasTexture(canvas);
+//           const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+//           const sprite = new THREE.Sprite(material);
+
+//           // Taller scale since text is angled
+//           sprite.scale.set(size, size * 3, 1);
+
+//           return sprite;
+// }
+        function makePeakLabel(
+          text,
+          color = "#000",
+          {
+            fontPx = 48,      // base font size in CSS pixels
+            sizeWorld = 12,   // how big the label is in your 3D world units
+            angleDeg = -60    // rotation of the text on the canvas (30° off vertical)
+          } = {}
+        ) {
+          const dpr = window.devicePixelRatio || 1;
+
+          // Logical canvas size in CSS pixels (we'll scale by DPR for sharpness)
+          const logicalSize = 512;
           const canvas = document.createElement("canvas");
-          canvas.width = canvas.height = 256;
+          canvas.width = logicalSize * dpr;
+          canvas.height = logicalSize * dpr;
+
           const ctx = canvas.getContext("2d");
 
-          ctx.clearRect(0, 0, 256, 256);
+          // Map 0..logicalSize coords to the high-res backing store
+          ctx.scale(dpr, dpr);
+
+          // Clean, modern font
+          ctx.clearRect(0, 0, logicalSize, logicalSize);
           ctx.fillStyle = color;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.font = `bold ${fontPx}px sans-serif`;
-          ctx.fillText(text, 128, 128);
 
+          // We'll possibly shrink the font if the word is too long
+          let currentFontPx = fontPx;
+          const setFont = () => {
+            ctx.font = `600 ${currentFontPx}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+          };
+          setFont();
+
+          // Measure and auto-shrink to avoid clipping
+          const padding = 40; // leave margin so rotated text doesn't hit the canvas edge
+          let metrics = ctx.measureText(text);
+          let textWidth = metrics.width;
+          const maxWidth = logicalSize - 2 * padding;
+
+          if (textWidth > maxWidth) {
+            const scale = maxWidth / textWidth;
+            currentFontPx = currentFontPx * scale;
+            setFont();
+            metrics = ctx.measureText(text);
+            textWidth = metrics.width;
+          }
+
+          // Rotate slightly off vertical and draw text
+          ctx.save();
+          ctx.translate(logicalSize / 2, logicalSize / 2);
+          const angleRad = angleDeg * Math.PI / 180; // e.g. -60°
+          ctx.rotate(angleRad);
+          ctx.fillText(text, 0, 0);
+          ctx.restore();
+
+          // Create THREE texture with better filtering
           const texture = new THREE.CanvasTexture(canvas);
-          const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          texture.anisotropy =
+            (renderer.capabilities && renderer.capabilities.getMaxAnisotropy
+              ? renderer.capabilities.getMaxAnisotropy()
+              : 1);
+          texture.needsUpdate = true;
+
+          const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true
+          });
+
           const sprite = new THREE.Sprite(material);
 
-          sprite.scale.set(size, size * 2, 2);
+          // World size of the label: keep this roughly proportional to what you want on-screen
+          sprite.scale.set(sizeWorld, sizeWorld * 3, 1);
+
           return sprite;
         }
+
 
         // =====================
         // 5. OVERPASS API: FETCH PEAKS
         // =====================
 
         // Fetch "natural=peak" within radiusMeters of (lat, lon)
-        function fetchPeaksFromOverpass(lat, lon, radiusMeters = 80000) {
+        function fetchPeaksFromOverpass(lat, lon, radiusMeters = 50000) {
           const query = `
             [out:json][timeout:25];
             node["natural"="peak"](around:${radiusMeters},${lat},${lon});
@@ -169,16 +337,37 @@
           const maxEle = Math.max(...peaks.map(p => p.ele || 1));
 
           peaks.forEach(p => {
-            const height = 10 * (p.ele / maxEle); // same idea as before
+            // 1) decide mountain visual size in world units
+            const height = 10 * p.ele / maxEle;   // same idea as before
             const width  = 3;
 
+            // 2) create triangle outline and place it on the horizon
             const tri = makeTrianglePeak(height, width, p.color || 0x0000ff);
             scene.add(tri);
             placePeakOnHorizon(tri, user, p, lineRadius, height);
 
+            // 3) find the peak TIP in world coordinates
+            // local tip is (0, height, 0) in the triangle’s own space
+            const tipLocal = new THREE.Vector3(0, height, 0);
+            const tipWorld = tri.localToWorld(tipLocal.clone());
+
+            // 4) define where the label should go:
+            //    move "up" in world Y from the tip (toward top of screen when horizon is centered)
+            const labelOffset = 30; // tweak this number to move label higher/lower
+            const labelPos = tipWorld.clone().add(new THREE.Vector3(0, labelOffset, 0));
+
+            // 5) draw a line from peak tip to label position
+            const leaderGeom = new THREE.BufferGeometry().setFromPoints([
+              tipWorld,
+              labelPos
+            ]);
+            const leaderMat  = new THREE.LineBasicMaterial({ color: 0x000000 });
+            const leaderLine = new THREE.Line(leaderGeom, leaderMat);
+            scene.add(leaderLine);
+
+            // 6) create label at the end of that line
             const label = makePeakLabel(p.name, "#000");
-            label.position.copy(tri.position);
-            label.position.y += height + 2;
+            label.position.copy(labelPos);
             scene.add(label);
           });
         }
@@ -186,11 +375,32 @@
         // =====================
         // 6. GET USER LOCATION, THEN LOAD PEAKS
         // =====================
+        // function initPeaks() {
+        //   const radiusMeters = 50000; // ~50 miles
+        //   fetchPeaksFromOverpass(user.lat, user.lon, radiusMeters)
+        //     .then(data => {
+        //       const peaks = buildPeaksFromOverpass(data);
+        //       drawPeaks(peaks);
+        //     })
+        //     .catch(err => {
+        //       console.error("Error fetching peaks from Overpass:", err);
+        //     });
+        // }
+
+
         function initPeaks() {
-          const radiusMeters = 80000; // ~50 miles
+          const radiusMeters = 50000; // ~50 miles
           fetchPeaksFromOverpass(user.lat, user.lon, radiusMeters)
             .then(data => {
-              const peaks = buildPeaksFromOverpass(data);
+              let peaks = buildPeaksFromOverpass(data);
+
+              // ⬇️ reduce to “visible” / dominant peaks
+              peaks = filterVisiblePeaks(peaks, user, {
+                binSizeDeg: 2,      // try 1–5° and see what looks good
+                minAngleRad: 0      // 0 = only above-horizon; use -Infinity to keep all
+              });
+
+              console.log("Peaks after visibility filter:", peaks.length);
               drawPeaks(peaks);
             })
             .catch(err => {
@@ -310,7 +520,7 @@
           camera.quaternion.copy(quaternion);
         }
 
-        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
+        window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
     </script>
 </body>
 </html>
