@@ -1,107 +1,106 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Three.js CDN Example</title>
+    <title>Three.js Peaks Viewer</title>
 </head>
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
-        // Create World
+        // =====================
+        // 1. CREATE WORLD
+        // =====================
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer();
-        scene.background = new THREE.Color(0xFFFFFF)
+        scene.background = new THREE.Color(0xFFFFFF);
         renderer.setSize(window.innerWidth, window.innerHeight);
-
         document.body.appendChild(renderer.domElement);
 
+        // Default user location (fallback: your old hardcoded one)
+        let user = { lat: 37.7380151, lon: -122.4299151 };
 
-        // Draw cylinder
-
+        // =====================
+        // 2. CYLINDER + HORIZON
+        // =====================
         const cylinderRadius = 100;
         const cylinderHeight = 100;
-        const radialSegments = 360; // More segments for a smoother cylinder
-        const cylinderGeometry = new THREE.CylinderGeometry(cylinderRadius, cylinderRadius, cylinderHeight, radialSegments);
-        const cylinderMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc}); //  wireframe: true 
+        const radialSegments = 360;
+
+        const cylinderGeometry = new THREE.CylinderGeometry(
+          cylinderRadius,
+          cylinderRadius,
+          cylinderHeight,
+          radialSegments
+        );
+        const cylinderMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc });
         const cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
         scene.add(cylinder);
 
-
-        // Draw horizon
-
+        // Horizon line
         const linePoints = [];
-        const lineRadius = cylinderRadius; 
-        const lineHeight = 0; // at the horizon
+        const lineRadius = cylinderRadius;
+        const lineHeight = 0;
 
         for (let i = 0; i <= radialSegments; i++) {
-                const angle = (i / radialSegments) * Math.PI * 2;
-                const x = lineRadius * Math.cos(angle);
-                const z = lineRadius * Math.sin(angle);
-                linePoints.push(new THREE.Vector3(x, lineHeight, z));
-            }
+          const angle = (i / radialSegments) * Math.PI * 2;
+          const x = lineRadius * Math.cos(angle);
+          const z = lineRadius * Math.sin(angle);
+          linePoints.push(new THREE.Vector3(x, lineHeight, z));
+        }
 
         const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
-        const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 }); // Red line, thickness 2
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
         const line = new THREE.Line(lineGeometry, lineMaterial);
         scene.add(line);
 
-        // Calculate position using current lat/long and peak lat long
-        // //Calculate bearing from user to peak
+        // =====================
+        // 3. BEARING HELPERS
+        // =====================
         const toRad = d => d * Math.PI / 180;
         const toDeg = r => r * 180 / Math.PI;
 
         function compassBearingDeg(lat1, lon1, lat2, lon2) {
           const latr1 = toRad(lat1), latr2 = toRad(lat2);
-          const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(latr2);
-          const x = Math.cos(latr1)*Math.sin(latr2) - Math.sin(latr1)*Math.cos(latr2)*Math.cos(toRad(lon2 - lon1));
-          return (toDeg(Math.atan2(y, x)) + 360) % 360; // 0..360 where 0 is North
+          const dLon = toRad(lon2 - lon1);
+
+          const y = Math.sin(dLon) * Math.cos(latr2);
+          const x = Math.cos(latr1) * Math.sin(latr2) -
+                    Math.sin(latr1) * Math.cos(latr2) * Math.cos(dLon);
+          return (toDeg(Math.atan2(y, x)) + 360) % 360; // 0..360, 0 = North
         }
 
-        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing - 90); // convert compass bearing to scene bearing
+        const sceneBearingRad = bearing => THREE.MathUtils.degToRad(bearing - 90);
 
-        // //function to place the cone
         function placePeakOnHorizon(obj, user, peak, radius, height = 2) {
           const brg = compassBearingDeg(user.lat, user.lon, peak.lat, peak.lon);
           const ang = sceneBearingRad(brg);
 
           obj.position.set(
             radius * Math.cos(ang),
-            0,                 // base sits on horizon line
+            0, // base on horizon
             radius * Math.sin(ang)
           );
 
-          // face inward toward the viewer
           obj.lookAt(0, 0, 0);
         }
 
-        // // make triangle outline instead
-
+        // =====================
+        // 4. PEAK GEOMETRY + LABELS
+        // =====================
         function makeTrianglePeak(height, width, color = 0x000000) {
-          // Local triangle points, base centered at (0,0,0), pointing "up" in +Y
           const halfW = width / 2;
           const points = [
-            new THREE.Vector3(-halfW, 0, 0),   // left base
-            new THREE.Vector3(0,      height, 0), // tip
-            new THREE.Vector3(halfW,  0, 0),   // right base
-            new THREE.Vector3(-halfW, 0, 0),   // close the loop
+            new THREE.Vector3(-halfW, 0, 0),
+            new THREE.Vector3(0,      height, 0),
+            new THREE.Vector3(halfW,  0, 0),
+            new THREE.Vector3(-halfW, 0, 0),
           ];
 
           const geom = new THREE.BufferGeometry().setFromPoints(points);
           const mat  = new THREE.LineBasicMaterial({ color });
-          const tri  = new THREE.Line(geom, mat);
-
-          return tri;
+          return new THREE.Line(geom, mat);
         }
 
-
-        // //draw mountains
-        const user = { lat: 37.7380151, lon: -122.4299151 }; // you
-        const peaks = [ 
-                        { name: "Mt Tam", lat: 37.923063, lon: -122.6162559, ele: 744, color: 0x0000ff }, // blue
-                        { name: "Mt Tam2", lat: 37.923493, lon: -122.6162569, ele: 944, color: 0xff0000 }, // blue
-                        { name: "Mt Diablo", lat: 37.8818613, lon: -121.9193885, ele: 1173, color: 0xff0000 }, // red
-                      ];
-        const maxEle = 1173
         function makePeakLabel(text, color = "#000", fontPx = 50, size = 10) {
           const canvas = document.createElement("canvas");
           canvas.width = canvas.height = 256;
@@ -118,52 +117,111 @@
           const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
           const sprite = new THREE.Sprite(material);
 
-          sprite.scale.set(size, size * 2, 2); // tweak size as needed
+          sprite.scale.set(size, size * 2, 2);
           return sprite;
         }
 
-        // peaks.forEach(p => {
-        //   const distance = p.ele
-        //   const coneHeight = 10*p.ele/maxEle;
-        //   const cone = new THREE.Mesh(
-        //     new THREE.ConeGeometry(coneHeight/2, coneHeight, 16),
-        //     new THREE.MeshBasicMaterial({ color: p.color })
-        //   );
-        //   scene.add(cone);
-        //   placePeakOnHorizon(cone, user, p, lineRadius, coneHeight);
+        // =====================
+        // 5. OVERPASS API: FETCH PEAKS
+        // =====================
 
-        //   // draw label
+        // Fetch "natural=peak" within radiusMeters of (lat, lon)
+        function fetchPeaksFromOverpass(lat, lon, radiusMeters = 80000) {
+          const query = `
+            [out:json][timeout:25];
+            node["natural"="peak"](around:${radiusMeters},${lat},${lon});
+            out body;
+          `;
 
-        //   const label = makePeakLabel(p.name, "#000");
-        //   label.position.copy(cone.position);
-        //   label.position.y += coneHeight + 2; // a bit above the tip
-        //   scene.add(label);
-        // });
+          return fetch("https://overpass-api.de/api/interpreter", {
+            method: "POST",
+            body: query
+          }).then(res => res.json());
+        }
 
+        // Convert Overpass JSON -> peaks array in your format
+        function buildPeaksFromOverpass(json) {
+          if (!json.elements) return [];
 
-        peaks.forEach(p => {
-          // decide how tall/wide you want the outline in world units
-          const height = 10*p.ele/maxEle;   // tweak to taste or compute from real mountain
-          const width  = 3;   // base width in world units
+          return json.elements
+            .filter(el => el.type === "node")
+            .map(el => {
+              const tags = el.tags || {};
+              const ele = tags.ele ? parseFloat(tags.ele) : null;
 
-          const tri = makeTrianglePeak(height, width, p.color);
-          scene.add(tri);
+              return {
+                name: tags.name || "Unnamed peak",
+                lat: el.lat,
+                lon: el.lon,
+                ele: Number.isFinite(ele) ? ele : 1000, // fallback if no elevation
+                color: 0x0000ff
+              };
+            });
+        }
 
-          // re-use your existing placement logic,
-          // but now we think in terms of "height" instead of coneHeight
-          placePeakOnHorizon(tri, user, p, lineRadius, height);
+        // Draw peaks (triangles + labels) once we have them
+        function drawPeaks(peaks) {
+          if (!peaks.length) {
+            console.warn("No peaks found from Overpass.");
+            return;
+          }
 
-          // label above tip (optional)
-          const label = makePeakLabel(p.name, "#000");
-          label.position.copy(tri.position);
-          label.position.y += height + 2;
-          scene.add(label);
-        });
+          const maxEle = Math.max(...peaks.map(p => p.ele || 1));
 
+          peaks.forEach(p => {
+            const height = 10 * (p.ele / maxEle); // same idea as before
+            const width  = 3;
 
+            const tri = makeTrianglePeak(height, width, p.color || 0x0000ff);
+            scene.add(tri);
+            placePeakOnHorizon(tri, user, p, lineRadius, height);
 
-        // Add compass direction indicators to horizon
+            const label = makePeakLabel(p.name, "#000");
+            label.position.copy(tri.position);
+            label.position.y += height + 2;
+            scene.add(label);
+          });
+        }
 
+        // =====================
+        // 6. GET USER LOCATION, THEN LOAD PEAKS
+        // =====================
+        function initPeaks() {
+          const radiusMeters = 80000; // ~50 miles
+          fetchPeaksFromOverpass(user.lat, user.lon, radiusMeters)
+            .then(data => {
+              const peaks = buildPeaksFromOverpass(data);
+              drawPeaks(peaks);
+            })
+            .catch(err => {
+              console.error("Error fetching peaks from Overpass:", err);
+            });
+        }
+
+        // Try to get real device location; fall back to default if denied
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            pos => {
+              user = {
+                lat: pos.coords.latitude,
+                lon: pos.coords.longitude
+              };
+              initPeaks();
+            },
+            err => {
+              console.warn("Geolocation failed, using default location:", err);
+              initPeaks();
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+          );
+        } else {
+          console.warn("Geolocation not supported, using default location.");
+          initPeaks();
+        }
+
+        // =====================
+        // 7. COMPASS INDICATORS (N/E/S/W)
+        // =====================
         function makeDirectionIndicators(letter, color = "#000", fontPx = 72, size = 18) {
           const canvas = document.createElement("canvas");
           canvas.width = canvas.height = 256;
@@ -173,7 +231,7 @@
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.font = `bold ${fontPx}px sans-serif`;
-          ctx.fillText(letter, 128, 128); // letters centered on horizon
+          ctx.fillText(letter, 128, 128);
 
           const tex = new THREE.CanvasTexture(canvas);
           const mat = new THREE.MeshBasicMaterial({
@@ -183,8 +241,7 @@
           });
 
           const geo = new THREE.PlaneGeometry(size, size);
-          const mesh = new THREE.Mesh(geo, mat);
-          return mesh;
+          return new THREE.Mesh(geo, mat);
         }
 
         const dirs = [
@@ -199,46 +256,37 @@
           const ang = sceneBearingRad(d.bearing);
           const r = lineRadius;
 
-          // position on horizon ring
           mesh.position.set(
             r * Math.cos(ang),
-            0, // exactly on the horizon
+            0,
             r * Math.sin(ang)
           );
 
-          // orient so the letter faces the center (radially)
           mesh.lookAt(0, 0, 0);
-
           scene.add(mesh);
         });
 
-
-        // Render world
-
+        // =====================
+        // 8. RENDER LOOP
+        // =====================
         function animate() {
-            requestAnimationFrame(animate);
-            // cylinder.rotation.x += 0.01;
-            // cylinder.rotation.z += 0.01;
-            renderer.render(scene, camera);
+          requestAnimationFrame(animate);
+          renderer.render(scene, camera);
         }
         animate();
 
-
-        // Orient world rotation with device rotation
-
-
+        // =====================
+        // 9. DEVICE ORIENTATION → CAMERA
+        // =====================
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
         const quaternion = new THREE.Quaternion();
         const screenOrientationQuaternion = new THREE.Quaternion();
         const zAxis = new THREE.Vector3(0, 0, 1);
 
-        // // Rotate -90° about X so device "forward" aligns with camera -Z
         const q1 = new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(1, 0, 0),
           -Math.PI / 2
         );
-
-
 
         function onDeviceOrientation(event) {
           if (event.alpha == null) return;
@@ -247,27 +295,22 @@
           const betaRad  = THREE.MathUtils.degToRad(event.beta);
           const gammaRad = THREE.MathUtils.degToRad(event.gamma);
 
-          // Use modern API if available; fall back to window.orientation
           const screenAngle =
             (screen.orientation && screen.orientation.angle) || window.orientation || 0;
           const screenAngleRad = THREE.MathUtils.degToRad(screenAngle);
 
-          // Device -> quaternion
           euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
           quaternion.setFromEuler(euler);
 
-          // FIX: align device frame to Three.js camera frame
           quaternion.multiply(q1);
 
-          // Compensate screen rotation
           screenOrientationQuaternion.setFromAxisAngle(zAxis, -screenAngleRad);
           quaternion.multiply(screenOrientationQuaternion);
 
           camera.quaternion.copy(quaternion);
         }
 
-        window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
-
+        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
     </script>
 </body>
 </html>
