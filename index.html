@@ -85,7 +85,7 @@
 
           obj.position.set(
             radius * Math.cos(ang),
-            0,
+            0, // base on horizon
             radius * Math.sin(ang)
           );
 
@@ -334,8 +334,6 @@
         // =====================
         // 6. SELECTION APPEARANCE
         // =====================
-        // selectedEntry = null → everyone full color
-        // selectedEntry = some peak → that one full color & bigger text, others grayscale + faded labels
         function applySelection(selectedEntry) {
           if (!selectedEntry) {
             // No selection: restore full color + normal labels
@@ -406,12 +404,31 @@
           const maxDist = Math.max(...peaks.map(p => p._distMeters || 1));
 
           peaks.forEach(p => {
-            const height = 10 * p.ele / maxEle;
+            const ele = p.ele || 0;
+            const d   = p._distMeters;
+
+            // 0..1 distance factor (0 = near, 1 = far)
+            const tDist = Math.min(1, d / maxDist);
+
+            // 0..1: elevation & distance normalized
+            const eNorm = ele / maxEle;       // taller peak → bigger
+            const dNorm = 1 - tDist;          // closer → bigger
+
+            // Blend them (elevation dominates, distance still matters)
+            const weightEle  = 0.7;
+            const weightDist = 0.3;
+            let combined = weightEle * eNorm + weightDist * dNorm;
+            combined = Math.max(0.1, combined); // avoid too tiny
+
+            // Map combined factor into world height range
+            const minH = 4;
+            const maxH = 20;
+            const height = minH + combined * (maxH - minH);
+
             const width  = 3;
 
-            const d = p._distMeters;
-            const t = Math.min(1, d / maxDist); // 0 near, 1 far
-
+            // color by distance red→blue
+            const t = tDist; // 0 near, 1 far
             const col = nearColor.clone().lerp(farColor, t);
             const colHex = col.getHex();
 
@@ -421,6 +438,7 @@
             const gray = new THREE.Color().setHSL(0, 0, hsl.l);
             const grayHex = gray.getHex();
 
+            // line thickness by distance
             const maxThickness = 6;
             const minThickness = 1;
             const thickness = maxThickness - t * (maxThickness - minThickness);
@@ -429,6 +447,7 @@
             scene.add(tri);
             placePeakOnHorizon(tri, user, p, lineRadius, height);
 
+            // transparent shading (slightly stronger for nearer peaks)
             let shadeOpacity = 0.35 - 0.25 * t;
             shadeOpacity = Math.max(0.05, shadeOpacity);
 
@@ -438,6 +457,7 @@
             shade.position.y -= 0.05;
             scene.add(shade);
 
+            // label placement
             const tipLocal = new THREE.Vector3(0, height, 0);
             const tipWorld = tri.localToWorld(tipLocal.clone());
 
@@ -452,10 +472,11 @@
             const leaderLine = new THREE.Line(leaderGeom, leaderMat);
             scene.add(leaderLine);
 
+            // subtitle text: distance & elevation
             const distMiles = d / 1609.34;
             const distStr = distMiles.toFixed(1) + " mi";
 
-            const eleMeters = p.ele || 0;
+            const eleMeters = ele;
             const eleFeet = eleMeters * 3.28084;
             const eleStr = Math.round(eleFeet).toLocaleString() + " ft";
 
