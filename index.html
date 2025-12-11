@@ -81,7 +81,7 @@
         // 1. CREATE WORLD
         // =====================
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer();
         scene.background = new THREE.Color(0xFFFFFF);
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -231,6 +231,10 @@
         // =====================
         // 4. PEAK GEOMETRY + LABELS
         // =====================
+
+        // Text rotation inside the texture (degrees). 30 = fixed diagonal.
+        const LABEL_ANGLE_DEG = -90;
+
         function makeTrianglePeak(height, width, color = 0x000000, thickness = 1) {
           const halfW = width / 2;
           const points = [
@@ -272,7 +276,7 @@
           return new THREE.Mesh(geom, mat);
         }
 
-        // Helper: build label texture only
+        // Helper: build label texture only (same font look as before)
         function buildPeakLabelTexture(
           name,
           subtitle,
@@ -280,7 +284,7 @@
           {
             titleFontPx = 56,
             subtitleFontPx = 32,
-            angleDeg = -90,   // vertical
+            angleDeg = LABEL_ANGLE_DEG,
           } = {}
         ) {
           const dpr = window.devicePixelRatio || 1;
@@ -344,27 +348,37 @@
           return texture;
         }
 
-        // Sprite builder that uses the texture helper
+        // Build a 3D label as a plane (NOT a sprite) so it doesn't billboard
         function makePeakLabel(
           name,
           subtitle,
           color = "#000",
           {
             sizeWorld = 14,
-            angleDeg = -90
+            angleDeg = LABEL_ANGLE_DEG,
           } = {}
         ) {
           const texture = buildPeakLabelTexture(name, subtitle, color, { angleDeg });
-          const material = new THREE.SpriteMaterial({
+
+          const material = new THREE.MeshBasicMaterial({
             map: texture,
-            transparent: true
+            transparent: true,
+            side: THREE.DoubleSide
           });
-          const sprite = new THREE.Sprite(material);
-          sprite.scale.set(sizeWorld, sizeWorld * 3, 1);
-          return sprite;
+
+          // Use texture aspect ratio to size the plane
+          const img = texture.image;
+          const aspect = (img && img.width && img.height) ? img.width / img.height : 1;
+
+          const widthWorld = sizeWorld;
+          const heightWorld = sizeWorld / aspect;
+
+          const geometry = new THREE.PlaneGeometry(widthWorld, heightWorld);
+          const mesh = new THREE.Mesh(geometry, material);
+          return mesh;
         }
 
-        // Convenience: update label color + font sizes for an entry
+        // Update label style (color + font sizes) by rebuilding texture
         function setEntryLabelStyle(
           entry,
           cssColor,
@@ -374,7 +388,7 @@
           const tex = buildPeakLabelTexture(entry.data.name, entry.subtitle, cssColor, {
             titleFontPx,
             subtitleFontPx,
-            angleDeg: -90
+            angleDeg: LABEL_ANGLE_DEG
           });
           if (entry.label.material.map) entry.label.material.map.dispose();
           entry.label.material.map = tex;
@@ -400,7 +414,11 @@
           if (!json.elements) return [];
 
           return json.elements
-            .filter(el => el.type === "node")
+            .filter(el => 
+              el.type === "node" &&
+              el.tags && 
+              el.tags.wikidata               // <-- only keep peaks with wikidata
+            )
             .map(el => {
               const tags = el.tags || {};
               const ele = tags.ele ? parseFloat(tags.ele) : null;
@@ -410,10 +428,12 @@
                 lat: el.lat,
                 lon: el.lon,
                 ele: Number.isFinite(ele) ? ele : 1000,
-                color: 0x0000ff
+                color: 0x0000ff,
+                wikidata: tags.wikidata      // optional: keep wikidata if you want it later
               };
             });
         }
+
 
         // =====================
         // 6. CLEAR PEAKS
@@ -431,7 +451,9 @@
             entry.shade.material.dispose();
             entry.leaderLine.geometry.dispose();
             entry.leaderLine.material.dispose();
+
             if (entry.label.material.map) entry.label.material.map.dispose();
+            entry.label.geometry.dispose();
             entry.label.material.dispose();
           });
           peakObjects.length = 0;
@@ -592,6 +614,10 @@
             const labelBaseColor = "#000000";
             const label = makePeakLabel(p.name, subtitle, labelBaseColor);
             label.position.copy(labelPos);
+
+            // *** KEY BIT: make label rotate exactly like the peak ***
+            label.rotation.copy(tri.rotation);
+
             scene.add(label);
 
             // store for interaction
@@ -789,7 +815,7 @@
           }
         }
 
-        window.addEventListener('deviceorientationabsolute', onDeviceOrientation, { passive: true });
+        window.addEventListener('deviceorientation', onDeviceOrientation, { passive: true });
 
         // =====================
         // 14. CLICK HANDLER (CLICK TRIANGLE / SHADE)
