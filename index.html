@@ -510,7 +510,7 @@
         // =====================
         // 5. OVERPASS API: FETCH PEAKS
         // =====================
-        function fetchPeaksFromOverpass(lat, lon, radiusMeters = 50000) {
+        function fetchPeaksFromOverpass(lat, lon, radiusMeters = 80000) {
           const query = `
             [out:json][timeout:25];
             node["natural"="peak"](around:${radiusMeters},${lat},${lon});
@@ -764,10 +764,10 @@
 
               peaks = peaks.filter(p => p.name && !p.name.toLowerCase().includes("unnamed"));
 
-              peaks = filterVisiblePeaks(peaks, user, {
-                binSizeDeg: 2,
-                minAngleRad: 0
-              });
+              // peaks = filterVisiblePeaks(peaks, user, {
+              //   binSizeDeg: 2,
+              //   minAngleRad: 0
+              // });
 
               if (!peaks.length) {
                 console.warn("No peaks found from Overpass.");
